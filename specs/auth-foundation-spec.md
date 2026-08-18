@@ -64,10 +64,12 @@ authorization boundary a P0 concern rather than a later hardening pass.
 **Authentication**
 
 - [ ] **AC-1** A user with a correct email and password, whose account status is
-  Active, is signed in. (FR-001)
-- [ ] **AC-2** A user with an incorrect password, an unknown email, or a non-Active
-  account status is not signed in, and the four cases are indistinguishable to the
-  caller in both message and observable timing. (FR-001, FR-003)
+  Active **and whose email address is verified**, is signed in. (FR-001, FR-005,
+  Q-01.05)
+- [ ] **AC-2** A user with an incorrect password, an unknown email, a non-Active
+  account status, or an unverified email address is not signed in, and these cases are
+  indistinguishable to the caller in both message and observable timing. (FR-001,
+  FR-003, FR-005)
 - [ ] **AC-3** All four roles — Super Admin, Trainer, Coach, Player/Parent — sign in
   through the same mechanism, with no role-specific sign-in path. (FR-001)
 - [ ] **AC-4** No password is stored or logged in a recoverable form; only a salted
@@ -103,13 +105,22 @@ authorization boundary a P0 concern rather than a later hardening pass.
 
 - [ ] **AC-13** Account creation issues a verification link carrying a single-use,
   unpredictable token; following it marks the address verified. (FR-005)
+  *S1 boundary (recorded 2026-08-18):* S1 builds and tests the whole mechanism — token
+  issue, consume, single-use enforcement, and a public resend endpoint that exercises it
+  end to end — but has **no account-creation path to trigger it from**, because
+  self-registration is out of scope (S3 ShareLinks) and the `app:create-super-admin`
+  bootstrap sets verification directly to avoid a first-boot deadlock (AC-25). The
+  account-creation trigger is claimed by S2/S3, not silently dropped. AC-13 is therefore
+  satisfied in S1 via the resend path only.
 - [ ] **AC-14** A verification token is refused more than 24 hours after issue, and a
   replacement can be requested from the account. (FR-005, BR-003)
 
 **Authorization (RBAC)**
 
 - [ ] **AC-15** Every user account carries exactly one role, and the schema makes a
-  second role unrepresentable rather than merely discouraged. (FR-006, BR-004)
+  second role unrepresentable rather than merely discouraged. Capabilities that are not
+  the security identity — a parent who also plays — are carried by profile records
+  attached to that single-role account, never by a second role. (FR-006, BR-004, G-23)
 - [ ] **AC-16** After sign-in a user reaches the dashboard for their role, and each of
   the four roles has a distinct landing destination. (FR-006)
 - [ ] **AC-17** A request for a capability outside the caller's role is refused on the
@@ -140,6 +151,9 @@ authorization boundary a P0 concern rather than a later hardening pass.
   password reset requested and completed, email verified — are recorded with actor,
   timestamp, and source, and the records contain no password or token material.
   (FR-041 groundwork)
+- [ ] **AC-25** A Super Admin account can be created on a system with no users, by an
+  operator-run console command, without a self-registration path existing and without
+  credentials appearing in migration history or the repository. (G-08, BR-005)
 
 ## Edge cases
 
@@ -183,32 +197,41 @@ Also out of scope, permanently or by decision elsewhere:
   scope.
 - Self-service email change (BR-001 makes email read-only in MVP).
 
+## Resolved decisions
+
+Answered by the product owner on 2026-08-18, in the `/sdd` phase-2 gate. These were
+the blocking open questions; they are now inputs to the design, not guesses.
+
+- **G-23 — role model: one role plus profiles.** A `User` carries exactly one role,
+  which is the security identity, and capability-bearing `Profile` records attach to
+  it (player profile, coach profile, …). A parent who also plays is one account with
+  one role and two profiles. BR-004 therefore holds literally in the schema — AC-15
+  stands as written — and US-01.03 / US-01.06 are satisfied through profiles rather
+  than through a second role.
+- **Q-01.05 — email verification is required before first sign-in.** AC-1 is amended
+  below: an Active but unverified account cannot sign in. There is no
+  authenticated-but-unverified state.
+- **G-22 — thresholds pinned to OWASP-aligned defaults.** Password: minimum 12
+  characters, no composition rules, no rotation, maximum 4096 bytes accepted and
+  hashed unmodified, rejected against a common-password blocklist. Sign-in throttle:
+  5 failures per 15 minutes per account, plus 20 per hour per source. Password reset
+  requests and verification resends: 3 per hour per account, 10 per hour per source.
+  AC-19 and AC-20 are testable against these numbers.
+- **G-08 — first Super Admin created by console command.** An
+  `app:create-super-admin` command creates the bootstrap account, prompting
+  interactively and falling back to environment variables when run non-interactively.
+  No account-creating side effect lives in migration history. The command is also the
+  recovery path if every Super Admin is lost. See AC-25.
+
 ## Open questions
 
-Blocking — the design phase cannot honestly proceed until these are answered:
+Non-blocking — a documented default carries the design; the answer should be recorded
+before release:
 
-- **Q-01.05 (P1, client)** — Is email verification required before first sign-in, or
-  optional? This changes AC-1: whether an unverified Active account can sign in at all,
-  or signs in with reduced capability. Note the source spec reuses the identifier
-  `Q-01.05` for an unrelated COPPA question in US-01.06; this entry is the email
-  verification one.
-- **G-23** — The role model contradicts itself: BR-004 states exactly one role per
-  user, while US-01.03 describes a parent who is simultaneously a player, and US-01.06
-  describes a child with their own login. Until "role" and "profile" are separated, the
-  schema underlying AC-15 cannot be settled. This is the single most consequential
-  open item in the slice, because S2–S6 all build on the shape chosen here.
-- **G-22** — No password policy (minimum length, composition, reuse) and no
-  rate-limiting thresholds are specified. AC-19 and AC-20 are untestable without
-  numbers.
-- **G-08** — Nothing describes how the first Super Admin comes into existence. Since
-  self-registration does not exist and only a Super Admin can create trainers, the
-  system as specified cannot be bootstrapped.
-
-Non-blocking — a documented default can carry the design, but the answer should be
-recorded before release:
-
-- **Q-01.07 (P2, client)** — Session lifetime: 1, 7, or 30 days? AC-7 needs a number;
-  any of the three satisfies the criterion's shape.
+- **Q-01.07 (P2, client)** — Session lifetime: 1, 7, or 30 days? **Working default for
+  the design: 8 hours of inactivity, with no "remember me" in S1.** AC-7 is satisfied
+  by any of the offered numbers; changing it is a configuration change, not a design
+  change.
 - **Q-01.04 (P1, client)** — The full set of transactional emails. S1 needs only two
   (password reset, email verification); the wider list matters from S2 onward.
 
@@ -220,12 +243,14 @@ recorded before release:
 | FR-002 Password hashing, email uniqueness | AC-4, AC-5 |
 | FR-003 Session management (login, logout, expiry) | AC-2, AC-6, AC-7, AC-8 |
 | FR-004 Password reset (1 hour) | AC-9, AC-10, AC-11, AC-12 |
-| FR-005 Email verification (24 hours) | AC-13, AC-14 |
+| FR-005 Email verification (24 hours) | AC-1, AC-2, AC-13, AC-14 |
 | FR-006 RBAC, role dashboards, backend enforcement | AC-15, AC-16, AC-17, AC-18 |
 | FR-007 Rate limiting, CSRF | AC-19, AC-20, AC-21 |
 | NFR-007 Accessibility (WCAG 2.1 AA) | AC-22 |
 | NFR-008 Mobile / responsive | AC-23 |
 | NFR-009 Session security | AC-7, AC-8, AC-21 |
+| BR-005 Only Super Admin creates trainers (bootstrap) | AC-25 |
 
-Slice S1 is done when AC-1 … AC-24 hold and the four blocking open questions above
-have been answered rather than assumed.
+Slice S1 is done when AC-1 … AC-25 hold. The four blocking open questions were
+answered on 2026-08-18 and are recorded under "Resolved decisions"; the two remaining
+open questions are non-blocking and carry documented defaults.
