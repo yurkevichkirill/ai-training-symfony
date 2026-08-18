@@ -1,31 +1,76 @@
 security:
-    # https://symfony.com/doc/current/security.html#registering-the-user-hashing-passwords
+    # 'auto' resolves to Argon2id here (sodium is loaded), and stays correct if
+    # PHP's preferred algorithm moves. Keyed on the interface rather than on
+    # App\Entity\User so any future authenticatable class inherits it.
     password_hashers:
         Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface: 'auto'
 
-    # https://symfony.com/doc/current/security.html#loading-the-user-the-user-provider
     providers:
-        users_in_memory: { memory: null }
+        # No `property:` on purpose. Left unset, Doctrine's EntityUserProvider
+        # delegates the lookup to UserRepository::loadUserByIdentifier(), which
+        # is where email normalization lives. Setting `property: email` would
+        # bypass the repository and compare the raw typed identifier against the
+        # stored column, so 'Ann@X.com' would fail to match 'ann@x.com' (AC-5).
+        app_user_provider:
+            entity:
+                class: App\Entity\User
 
     firewalls:
         dev:
             # Ensure dev tools and static assets are always allowed
             pattern: ^/(_profiler|_wdt|assets|build)/
             security: false
+
         main:
             lazy: true
-            provider: users_in_memory
+            provider: app_user_provider
 
-            # Activate different ways to authenticate:
-            # https://symfony.com/doc/current/security.html#the-firewall
+            # Runs after the password is verified, never before -- see the class
+            # docblock for why checking account state pre-auth would leak it.
+            user_checker: App\Security\AccountStatusChecker
 
-            # https://symfony.com/doc/current/security/impersonating_user.html
-            # switch_user: true
+            form_login:
+                login_path: app_login
+                check_path: app_login
+                username_parameter: _username
+                password_parameter: _password
+                # The token id is 'authenticate' by default, which is already in
+                # csrf.yaml's stateless_token_ids -- nothing to override (AC-21).
+                enable_csrf: true
+                default_target_path: app_home
+                always_use_default_target_path: false
+                # Collapses every failure cause to one message and one response
+                # shape, so the response cannot be used to enumerate accounts.
+                failure_handler: App\Security\UniformAuthenticationFailureHandler
 
-    # Note: Only the *first* matching rule is applied
+            logout:
+                path: app_logout
+                target: app_login
+                invalidate_session: true
+                # token id defaults to 'logout', also in stateless_token_ids.
+                enable_csrf: true
+
+    # Flat by design. ROLE_SUPER_ADMIN deliberately does NOT inherit
+    # ROLE_TRAINER and friends: inheritance would give a Super Admin silent,
+    # unaudited reach into a trainer's workspace. That reach is impersonation,
+    # which is S6, and it is logged.
+    role_hierarchy:
+        ROLE_SUPER_ADMIN: [ROLE_USER]
+        ROLE_TRAINER: [ROLE_USER]
+        ROLE_COACH: [ROLE_USER]
+        ROLE_PLAYER: [ROLE_USER]
+
+    # Only the *first* matching rule is applied, so the catch-all must stay
+    # last. It is a catch-all rather than a list of protected prefixes on
+    # purpose: a route added later is protected by default, and forgetting to
+    # list it fails closed instead of open (AC-18).
     access_control:
-        # - { path: ^/admin, roles: ROLE_ADMIN }
-        # - { path: ^/profile, roles: ROLE_USER }
+        - { path: ^/(login|logout)$, roles: PUBLIC_ACCESS }
+        - { path: ^/reset-password, roles: PUBLIC_ACCESS }
+        - { path: ^/verify-email, roles: PUBLIC_ACCESS }
+        - { path: ^/(css|js|images)/, roles: PUBLIC_ACCESS }
+        - { path: ^/favicon.ico, roles: PUBLIC_ACCESS }
+        - { path: ^/, roles: ROLE_USER }
 
 when@test:
     security:

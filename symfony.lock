@@ -119,6 +119,42 @@
             ".editorconfig"
         ]
     },
+    "symfony/mailer": {
+        "version": "8.1",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "4.3",
+            "ref": "09051cfde49476e3c12cd3a0e44289ace1c75a4f"
+        },
+        "files": [
+            "config/packages/mailer.yaml"
+        ]
+    },
+    "symfony/messenger": {
+        "version": "8.1",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "6.0",
+            "ref": "d8936e2e2230637ef97e5eecc0eea074eecae58b"
+        },
+        "files": [
+            "config/packages/messenger.yaml"
+        ]
+    },
+    "symfony/monolog-bundle": {
+        "version": "4.0",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "3.7",
+            "ref": "1b9efb10c54cb51c713a9391c9300ff8bceda459"
+        },
+        "files": [
+            "config/packages/monolog.yaml"
+        ]
+    },
     "symfony/property-info": {
         "version": "8.1",
         "recipe": {
@@ -170,6 +206,15 @@
             "templates/base.html.twig"
         ]
     },
+    "symfony/uid": {
+        "version": "8.1",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "7.0",
+            "ref": "0df5844274d871b37fc3816c57a768ffc60a43a5"
+        }
+    },
     "symfony/validator": {
         "version": "8.1",
         "recipe": {
@@ -180,6 +225,18 @@
         },
         "files": [
             "config/packages/validator.yaml"
+        ]
+    },
+    "symfonycasts/reset-password-bundle": {
+        "version": "1.25",
+        "recipe": {
+            "repo": "github.com/symfony/recipes",
+            "branch": "main",
+            "version": "1.0",
+            "ref": "97c1627c0384534997ae1047b93be517ca16de43"
+        },
+        "files": [
+            "config/packages/reset_password.yaml"
         ]
     },
     "twig/extra-bundle": {

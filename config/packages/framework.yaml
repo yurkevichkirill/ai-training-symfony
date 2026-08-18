@@ -3,10 +3,45 @@ framework:
     secret: '%env(APP_SECRET)%'
 
     # Note that the session will be started ONLY if you read or write from it.
-    session: true
+    session:
+        # 'auto' sends the Secure flag whenever the request is HTTPS, which is
+        # why trusted_proxies below has to be right -- behind nginx the request
+        # only looks secure once X-Forwarded-Proto is honoured (AC-7).
+        cookie_secure: auto
+        cookie_httponly: true
+        cookie_samesite: lax
+        # Session cookie: dies with the browser session. Absolute lifetime is
+        # governed by gc_maxlifetime and the idle check in SessionIdleSubscriber,
+        # not by a persistent cookie.
+        cookie_lifetime: 0
+        # 8 hours, matching app.session_idle_seconds in services.yaml. The GC is
+        # opportunistic, so it is a backstop -- the deterministic expiry is the
+        # subscriber's.
+        gc_maxlifetime: 28800
+
+    # The app always runs behind the nginx service of docker-compose.yml, on a
+    # bridge network whose subnet Docker assigns dynamically (172.22.0.0/16 at
+    # the time of writing). 'private_ranges' expands to IpUtils::PRIVATE_SUBNETS,
+    # which covers every subnet Docker can hand out, so this does not break when
+    # the network is recreated. Without it Request::getClientIp() returns the
+    # nginx container's address -- which would make the per-IP login throttle
+    # global, and getSchemeAndHttpHost() (used by stateless CSRF origin checks)
+    # resolve to the proxy's scheme/host.
+    trusted_proxies: '%env(TRUSTED_PROXIES)%'
+    trusted_headers: ['x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host']
 
     #esi: true
     #fragments: true
+
+when@prod:
+    framework:
+        session:
+            # The __Host- prefix binds the cookie to this exact origin and
+            # forbids a Domain attribute, so a compromised sibling subdomain
+            # cannot set it. It requires HTTPS, which dev and test do not have,
+            # so it is production-only -- elsewhere the browser would reject the
+            # cookie outright and no one could stay signed in.
+            cookie_name: __Host-SESSID
 
 when@test:
     framework:

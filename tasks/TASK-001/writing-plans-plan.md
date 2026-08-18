@@ -53,6 +53,32 @@
 - Whether a test runner (PHPUnit) and a `_test` database are already
   reachable in this environment — Task 1 must report this, not assume it.
 
+## Execution environment (established 2026-08-18, answers the assumption above)
+
+- **Test runner: present and working.** PHPUnit 13.3.1, config
+  `phpunit.dist.xml` (note: *not* `phpunit.xml.dist`), bootstrap
+  `tests/bootstrap.php`, run with `php bin/phpunit`. It sets
+  `failOnDeprecation`/`failOnNotice`/`failOnWarning` — any deprecation emitted
+  by code written here fails the suite, so no task may leave one behind.
+- **The host PHP cannot reach the database.** `/usr/bin/php8.5` has no
+  `pdo_pgsql` (`could not find driver`), and `DATABASE_URL`'s host is
+  `database`, which only resolves inside the Compose network. Every
+  DB-touching command must run in the container:
+  `docker compose exec -T php php bin/console <cmd>`, or with
+  `-e APP_ENV=test` for the test environment. Verified: the container has
+  `pdo_pgsql` and reaches **PostgreSQL 18.6**.
+- **Containers are up**: `database` (healthy, published on 5432), `nginx`
+  (8080), `php`. Bridge subnet 172.22.0.0/16.
+- **The `_test` database does not exist yet.** `config/packages/doctrine.yaml`
+  sets `dbname_suffix: '_test%env(default::TEST_TOKEN)%'` under `when@test`,
+  so the target is `app_test`, and it currently errors with
+  `FATAL: database "app_test" does not exist`. **Task 9 must create it**
+  (`docker compose exec -T -e APP_ENV=test php php bin/console
+  doctrine:database:create`) before any repository or integration test in
+  Tasks 10, 11, 17, 19, 21, 23, 28, 32, 33, 35, 36 can run.
+- Tests that only boot the kernel without touching Doctrine (e.g. Task 3's
+  `TrustedProxyTest`) run fine on the host runner.
+
 ## Compatibility constraints
 
 - `config/packages/csrf.yaml` is not to be modified — it already has what S1
@@ -70,7 +96,7 @@
 
 ## Tasks
 
-- [ ] 1. **Install and pin the S1 Composer dependencies.**
+- [x] 1. **Install and pin the S1 Composer dependencies.**
   Run `composer require symfony/uid:8.1.* symfony/rate-limiter:8.1.*
   symfony/mailer:8.1.* symfony/messenger:8.1.* symfony/doctrine-messenger:8.1.*
   symfony/http-client:8.1.* symfony/monolog-bundle:^3.10
@@ -87,7 +113,26 @@
   (Supports AC-4, AC-9, AC-10, AC-11, AC-12, AC-13, AC-14, AC-19, AC-20,
   AC-24 — no criterion is satisfied by this task alone.)
 
-- [ ] 2. **Verify security, CSRF, rate-limiter and messenger config keys
+  **Done 2026-08-18.** Deviation: `symfony/monolog-bundle:^3.10` is
+  uninstallable on Symfony 8.1 — 3.11.x requires `symfony/config ^6.4 || ^7.0`
+  and 3.10.0 requires `symfony/monolog-bridge ^5.4 || ^6.0 || ^7.0`. Installed
+  `symfony/monolog-bundle:^4.0` (resolved v4.0.2, requires
+  `symfony/config ^7.3 || ^8.0`) instead; all other pins landed as written.
+  Resolved: `symfony/uid` v8.1.4, `symfony/rate-limiter` v8.1.4,
+  `symfony/mailer` v8.1.4, `symfony/messenger` v8.1.4,
+  `symfony/doctrine-messenger` v8.1.4, `symfony/http-client` v8.1.4,
+  `symfonycasts/reset-password-bundle` v1.25.0.
+  Verify results: `composer install` exits 0; `php bin/console about` runs
+  clean (Symfony v8.1.4, PHP 8.5.9); `composer audit` reports no advisories;
+  recipes created `config/packages/{messenger,mailer,monolog,reset_password}.yaml`,
+  `compose.override.yaml` (mailpit), added `MESSENGER_TRANSPORT_DSN` and
+  `MAILER_DSN=null://null` to `.env` (non-secret), and registered
+  `MonologBundle` + `SymfonyCastsResetPasswordBundle` in `config/bundles.php`.
+  `composer validate --strict` exits 2 on `name`/`description` missing — a
+  **pre-existing** property of the Flex skeleton's `composer.json`, unrelated
+  to this task and not changed here.
+
+- [x] 2. **Verify security, CSRF, rate-limiter and messenger config keys
   against installed `vendor/` sources — before any form is built.**
   Read the actual installed reference config, not memory or training data:
   `vendor/symfony/security-bundle/Resources/config/schema/security-1.0.xsd`
@@ -118,7 +163,14 @@
   (Directly de-risks AC-21; also the basis for AC-9, AC-10, AC-13, AC-14,
   AC-19, AC-20 being implemented correctly. Cited fully as AC-21.)
 
-- [ ] 3. **Configure `TRUSTED_PROXIES` for the nginx-fronted Docker stack.**
+  **Done 2026-08-18.** Findings written to `## Config verification notes
+  (Task 2)` at the end of this file. Every key Tasks 12/13/22/29/30 need was
+  confirmed in an installed source; nothing was left unconfirmed. Note there
+  is no `security-1.0.xsd` in this installation — SecurityBundle ships PHP
+  configuration classes only, so `MainConfiguration.php` and the
+  `Security/Factory/*.php` classes are the authority used.
+
+- [x] 3. **Configure `TRUSTED_PROXIES` for the nginx-fronted Docker stack.**
   Edit `config/packages/framework.yaml`: add
   `framework.trusted_proxies: '%env(TRUSTED_PROXIES)%'` and
   `framework.trusted_headers: ['x-forwarded-for','x-forwarded-proto','x-forwarded-host']`.
@@ -138,7 +190,37 @@
   auto` both misresolve to the proxy's address per the architecture's Risks
   section.)
 
-- [ ] 4. **Create `UserRole` and `UserStatus` backed enums.**
+  **Done 2026-08-18.** `config/packages/framework.yaml` now sets
+  `trusted_proxies: '%env(TRUSTED_PROXIES)%'` and the three `trusted_headers`;
+  `.env` gains `TRUSTED_PROXIES=private_ranges` (non-secret).
+  Deviation from the sketch, per Task 2's finding: the value is
+  `private_ranges`, not a hand-copied CIDR list. `docker network inspect
+  ai-training-symfony_default` reports the bridge subnet as **172.22.0.0/16**
+  — assigned dynamically by Docker, so pinning it would break whenever the
+  network is recreated. `private_ranges` expands to `IpUtils::PRIVATE_SUBNETS`
+  (`Request::setTrustedProxies()`,
+  `vendor/symfony/http-foundation/Request.php:648-651`, which honours the
+  literal at runtime as well as in config normalization) and covers
+  172.16.0.0/12 and every other pool Docker can hand out.
+  `tests/Functional/TrustedProxyTest.php` covers three cases and passes
+  (3 tests, 4 assertions): X-Forwarded-For from a bridge address resolves to
+  the real client; X-Forwarded-Proto/Host make `isSecure()` true and
+  `getSchemeAndHttpHost()` the public origin the CSRF check needs; and a
+  spoofed X-Forwarded-For from an untrusted peer is ignored.
+  `lint:yaml` clean; `debug:config framework trusted_headers` lists all three.
+
+  **Trap for Tasks 22, 23 and any later per-IP test.**
+  `IpUtils::PRIVATE_SUBNETS` contains the RFC 5737 documentation ranges —
+  `192.0.2.0/24`, `198.51.100.0/24` and `203.0.113.0/24` — the very addresses
+  tests reach for as "fake public IPs". Under `private_ranges` those are
+  **trusted proxies**, so a test that sets `REMOTE_ADDR` to one of them has
+  its `X-Forwarded-For` honoured and `getClientIp()` will not be the value the
+  test expects. This cost one failing assertion here before it was diagnosed.
+  Per-IP throttle tests must drive distinct clients via `X-Forwarded-For`
+  behind a bridge-range `REMOTE_ADDR`, or use genuinely public literals
+  (e.g. `8.8.8.8`, `93.184.216.34`) for the untrusted side.
+
+- [x] 4. **Create `UserRole` and `UserStatus` backed enums.**
   New files `src/Enum/UserRole.php` (`ROLE_SUPER_ADMIN`, `ROLE_TRAINER`,
   `ROLE_COACH`, `ROLE_PLAYER`, string-backed) and
   `src/Enum/UserStatus.php` (`ACTIVE`, `DEACTIVATED`, string-backed).
@@ -147,7 +229,14 @@
   (AC-15 — the enum is half of "a second role is unrepresentable"; the other
   half is the schema `CHECK` in Task 9.)
 
-- [ ] 5. **Create the `User` entity.**
+  **Done 2026-08-18.** `src/Enum/UserRole.php` (cases `SUPER_ADMIN`,
+  `TRAINER`, `COACH`, `PLAYER`, backed by the literal Symfony role strings
+  `ROLE_SUPER_ADMIN`/`ROLE_TRAINER`/`ROLE_COACH`/`ROLE_PLAYER`, so
+  `getRoles()` needs no mapping table) and `src/Enum/UserStatus.php`
+  (`ACTIVE`, `DEACTIVATED`). `ROLE_USER` is deliberately not a case — it comes
+  from `role_hierarchy` (Task 12). `php -l` clean on both.
+
+- [x] 5. **Create the `User` entity.**
   New file `src/Entity/User.php`, table `app_user`, mapped per the
   architecture's column table: `id` (`uuid`, UUIDv7 via `symfony/uid`'s
   `UuidV7` + a custom Doctrine ID generator or `#[ORM\Column(type:
@@ -171,7 +260,45 @@
   (AC-4 — hash column shape, no plaintext column; AC-5 — normalized email
   storage; AC-15 — scalar `role`.)
 
-- [ ] 6. **Create the `EmailVerificationToken` entity.**
+  **Done 2026-08-18.** `src/Entity/User.php` on `app_user` with every column
+  of the architecture's table, `timestamptz` mapped as
+  `datetimetz_immutable`, `role`/`status` as `enumType` columns, and
+  `UNIQUE (email)` declared as `uniq_app_user_email`.
+  Implements `UserInterface`, `PasswordAuthenticatedUserInterface`,
+  `EquatableInterface`; `getRoles()` returns `[$this->role->value]` only;
+  `isEqualTo()` compares exactly `id`, `role`, `status`, `password_hash`
+  (via `hash_equals`) and `email_verified_at`; `$id` is `readonly` so nothing
+  can mutate it.
+
+  Two decisions the plan left open, resolved:
+  1. **UUID generation happens in the constructor** (`new UuidV7()`), not via
+     `#[ORM\CustomIdGenerator]`. Both were allowed by the task; the
+     constructor wins because an entity then has its identity *before* flush,
+     which `AuthEventRecorder` (Task 34) needs when it records an event about
+     a user in the same unit of work.
+  2. **Email normalization lives in `User::normalizeEmail()`**, a static the
+     constructor and `setEmail()` both route through — so no call site can
+     bypass it, as the task required. Task 24's `UserAccountService` and
+     Task 11's `UserRepository` reuse the same static rather than
+     re-implementing `mb_strtolower(trim(...))`.
+
+  **Extra change this task had to make (no task owned it):** nothing
+  registered symfony/uid's DBAL types — `Type::hasType('uuid')` was `false`,
+  since neither DoctrineBundle nor the `symfony/uid` Flex recipe adds them.
+  `config/packages/doctrine.yaml` now declares
+  `dbal.types.uuid: Symfony\Bridge\Doctrine\Types\UuidType`. Without it
+  every entity below fails to map.
+
+  **Also created early:** `src/Repository/UserRepository.php` as a bare
+  `ServiceEntityRepository<User>`, because `#[ORM\Entity(repositoryClass:)]`
+  cannot point at a class that does not exist. Task 11 still owns giving it
+  `UserLoaderInterface`.
+
+  Verify: `php -l` clean; `doctrine:mapping:info` reports
+  `[OK] App\Entity\User` (run in the `php` container — see Execution
+  environment).
+
+- [x] 6. **Create the `EmailVerificationToken` entity.**
   New file `src/Entity/EmailVerificationToken.php`, table
   `email_verification_token`: `id` (`uuid` PK), `user` (`ManyToOne` to
   `User`, `user_id uuid`, `onDelete: CASCADE`), `selector` (`varchar(24)`,
@@ -180,7 +307,18 @@
   Verify: `php -l src/Entity/EmailVerificationToken.php`.
   (AC-13, AC-14 — schema for the stored single-use token.)
 
-- [ ] 7. **Create the `ResetPasswordRequest` entity implementing the
+  **Done 2026-08-18.** `src/Entity/EmailVerificationToken.php` with every
+  column and both indexes from the architecture (unique `selector`, plus
+  `(user_id, consumed_at)`). `hashed_verifier` is declared
+  `length: 64, options: ['fixed' => true]` so it emits `CHAR(64)` — SHA-256
+  hex is always exactly that width. All fields except `consumedAt` are
+  `readonly`; `consume()` uses `??=`, so replaying a request cannot move the
+  timestamp and a second consumption is a no-op rather than a silent success.
+  Also created `src/Repository/EmailVerificationTokenRepository.php` (bare
+  `ServiceEntityRepository`) — the entity's `repositoryClass` cannot reference
+  a class that does not exist; Task 26 owns its query methods.
+
+- [x] 7. **Create the `ResetPasswordRequest` entity implementing the
   bundle's interface.**
   New file `src/Entity/ResetPasswordRequest.php`, table
   `reset_password_request`, implementing
@@ -198,7 +336,31 @@
   Verify: `php -l` on both files.
   (AC-9, AC-10, AC-11, AC-12 — schema and repository the bundle needs.)
 
-- [ ] 8. **Create the `AuthEvent` entity.**
+  **Done 2026-08-18.** Both bundle traits exist in v1.25.0 and both are used,
+  as the task preferred:
+  `SymfonyCasts\Bundle\ResetPassword\Model\ResetPasswordRequestTrait`
+  supplies `selector`, `hashedToken`, `requestedAt`, `expiresAt` plus the
+  entire read side of `ResetPasswordRequestInterface`
+  (`getRequestedAt`, `isExpired`, `getExpiresAt`, `getHashedToken`), and
+  `…\Persistence\Repository\ResetPasswordRequestRepositoryTrait` supplies
+  six of the seven repository methods. Only `createResetPasswordRequest()` is
+  hand-written, because it alone has to know our constructor.
+  `src/Entity/ResetPasswordRequest.php` adds the UUIDv7 `id` and the
+  `ManyToOne` to `User` (`ON DELETE CASCADE`); everything else comes from the
+  trait.
+
+  **Recorded deviation from the architecture's column table:** the trait's own
+  mapping is `#[ORM\Column(type: Types::DATETIME_IMMUTABLE)]` for both
+  `requested_at` and `expires_at`, i.e. `TIMESTAMP WITHOUT TIME ZONE`, not the
+  `timestamptz` the architecture specifies for its own tables. That mapping
+  lives in vendor code and cannot be overridden without abandoning the trait
+  and reimplementing the interface by hand — which the task explicitly told us
+  not to do. It is safe: the bundle writes and compares these values through
+  `Clock::get()->now()` and `getTimestamp()`, so a single consistent zone is
+  all it requires. Only these two columns differ; `app_user`,
+  `email_verification_token` and `auth_event` are all `timestamptz`.
+
+- [x] 8. **Create the `AuthEvent` entity.**
   New file `src/Entity/AuthEvent.php`, table `auth_event`: `id` (`uuid`
   PK), `occurredAt` (`timestamptz`), `type` (`varchar(64)`), `outcome`
   (`varchar(16)`), `user` (`ManyToOne` to `User`, nullable,
@@ -211,7 +373,33 @@
   Verify: `php -l src/Entity/AuthEvent.php`.
   (AC-24 — the audit schema.)
 
-- [ ] 9. **Generate and hand-finish the auth-foundation migration.**
+  **Done 2026-08-18.** `src/Entity/AuthEvent.php` with the architecture's
+  columns and all three composite indexes (`(user_id, occurred_at)`,
+  `(type, occurred_at)`, `(ip, occurred_at)`). Genuinely write-once: every
+  property is `readonly` and the class has no setter at all, so no reachable
+  code path can edit an audit row. `user` is nullable with
+  `onDelete: 'SET NULL'`, so deleting an account does not destroy its trail.
+  `context` maps to `jsonb`. `userAgent` is truncated to 255 chars in the
+  constructor rather than letting an over-long header throw at flush.
+
+  **Decision on `ip`, which the task asked to be recorded: a custom DBAL
+  type.** `src/Doctrine/Type/InetType.php` (~50 lines) maps PostgreSQL's
+  native `inet` to a PHP string and is registered as
+  `doctrine.dbal.types.inet`. Rejected alternatives: `varchar(45)` would drop
+  PostgreSQL's own address validation and the network operators S6's audit
+  reports will want; a `columnDefinition` override would keep the column
+  outside Doctrine's schema model and leave permanent
+  `doctrine:schema:validate` noise. With a real type the column round-trips
+  and diffs cleanly. The rationale is repeated as a class docblock, per the
+  task's instruction to record the choice in a code comment.
+  `src/Repository/AuthEventRepository.php` created for the same
+  `repositoryClass` reason as above; Task 34 owns its behavior.
+
+  Verify (Tasks 6-8 together): `php -l` clean on all six files;
+  `doctrine:mapping:info` reports `[OK]` for all four entities —
+  `AuthEvent`, `EmailVerificationToken`, `ResetPasswordRequest`, `User`.
+
+- [x] 9. **Generate and hand-finish the auth-foundation migration.**
   Run `php bin/console make:migration` to get a scaffold from the five
   entities mapped so far, then hand-edit the generated
   `migrations/Version*.php` to add what Doctrine DBAL cannot express:
@@ -240,7 +428,63 @@
   (AC-4, AC-5, AC-15 — the database enforces what the entities declare;
   AC-25 — proves no account row is created here.)
 
-- [ ] 10. **Build test data builders for the four roles × status ×
+  **Done 2026-08-18.** `migrations/Version20260818151509.php`.
+
+  **Deviation from the task text:** `make:migration` is unavailable —
+  `symfony/maker-bundle` is not installed and is not on the S1 dependency list
+  from Task 1. Used `doctrine:migrations:diff` (doctrine-migrations-bundle,
+  already installed), which produces the same scaffold. The class keeps the
+  standard `VersionYYYYMMDDHHMMSS` name rather than the architecture's
+  sketched `Version…AuthFoundation`, because Doctrine derives ordering from
+  that name; the intent is carried by `getDescription()` and the class
+  docblock instead.
+
+  Hand-finished as specified. The `UNIQUE (email)` index was already in the
+  diff as `uniq_app_user_email` (from Task 5's `#[ORM\UniqueConstraint]`), so
+  it was confirmed rather than added. All three CHECK constraints were written
+  by hand and are live in the database — verified with
+  `SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid
+  = 'app_user'::regclass`:
+  `app_user_email_lower_ck CHECK (email = lower(email))`,
+  `app_user_role_ck CHECK (role IN (…four roles…))`,
+  `app_user_status_ck CHECK (status IN ('ACTIVE','DEACTIVATED'))`.
+  `down()` is the exact reverse in reverse order (FKs, dependent tables, CHECK
+  constraints, `app_user` last).
+
+  **A fix this task had to make:** `doctrine:schema:validate` failed against
+  the freshly migrated schema with `ALTER TABLE auth_event ALTER ip TYPE
+  INET` — introspection read the `inet` column back as an unknown DB type, so
+  Doctrine saw permanent drift against a schema that was in fact correct.
+  `config/packages/doctrine.yaml` now also declares
+  `dbal.mapping_types.inet: inet`. Registering a custom type (Task 8) is not
+  enough on its own; the *reverse* mapping is what keeps introspection honest.
+
+  Verify results, all green:
+  - `doctrine:migrations:migrate` — 1 migration, 19 queries, OK.
+  - `doctrine:schema:validate` — mapping correct **and** database in sync, on
+    both the `app` and `app_test` databases.
+  - `doctrine:migrations:migrate prev` — down to version 0, leaving only
+    `doctrine_migration_versions` in `public`; then back up clean, proving the
+    down-migration reverses fully.
+  - `doctrine:migrations:diff` afterwards — `No changes detected in your
+    mapping information`, i.e. the migration and the mapping agree exactly.
+  - `grep -i insert` matches only the docblock sentence stating that no INSERT
+    exists; there is no `INSERT` statement (AC-25).
+
+  **`app_test` created here** (`doctrine:database:create` + `migrate` under
+  `APP_ENV=test`), which unblocks every DB-touching test from Task 10 onward.
+
+  **Deferred, deliberately: `messenger_messages`.** The architecture's
+  migration plan lists it in this migration, but it cannot be diffed yet —
+  `config/packages/messenger.yaml` still has only `sync://`, so no Doctrine
+  transport is registered and the schema listener contributes no table. Since
+  `MESSENGER_TRANSPORT_DSN` carries `auto_setup=0` (Task 2's note), the table
+  will not appear by itself either. **Task 29 must generate a second migration
+  for it** after it configures the `async` transport. Flagged rather than
+  fixed here, because configuring that transport is Task 29's scope and doing
+  it now would break the plan's dependency order.
+
+- [x] 10. **Build test data builders for the four roles × status ×
   verification combinations.**
   New file `tests/Support/UserFactory.php` (a plain object-mother-style
   builder, not Foundry — Foundry is not in `composer.json` and this plan
@@ -261,7 +505,34 @@
   (Enables the test tasks from here on for AC-1, AC-2, AC-3, AC-16, AC-17 —
   cited here as infrastructure, not as a standalone AC delivery.)
 
-- [ ] 11. **`UserRepository` as the entity provider's user loader.**
+  **Done 2026-08-18.** `tests/Support/UserFactory.php` with
+  `activeVerified()`, `activeUnverified()`, `deactivated()`, each taking a
+  `UserRole` and an optional explicit email, plus `passwordHash()` and a
+  sequence-backed `email()` so several persisted users never collide on
+  `UNIQUE (email)`. Password is `'a-valid-test-password-12'` as specified,
+  hashed with real Argon2id (confirmed available: `PASSWORD_ARGON2ID` is
+  defined and `sodium` loaded, on host and in the container).
+
+  Two judgement calls worth recording:
+  - **The hash is computed once per process** and memoized in a static.
+    Argon2id is deliberately expensive; hashing per constructed user would add
+    seconds to every functional test file for no coverage.
+  - **`deactivated()` returns a *verified* user.** Otherwise a "deactivated
+    account cannot sign in" test would pass even if the deactivation check
+    were missing entirely, because the unverified check would refuse it first.
+
+  `src/DataFixtures/AppFixtures.php` was left untouched — the optional half of
+  this task. Nothing in phase 4 so far needs a fixture-loaded dataset;
+  functional tests build their own users through the factory. If Task 38's
+  manual browser pass wants a fixed dataset, that is the point to add it.
+
+  Verify: `php -l` clean; `tests/Support/UserFactoryTest.php` goes beyond the
+  throwaway test the task asked for and covers all three builders across all
+  four roles, the Argon2id hash actually verifying against the known
+  plaintext, and email uniqueness/normalization — **14 tests, 44 assertions,
+  green**.
+
+- [x] 11. **`UserRepository` as the entity provider's user loader.**
   New file `src/Repository/UserRepository.php` extending
   `ServiceEntityRepository`, implementing `UserLoaderInterface` and
   `PasswordUpgraderInterface`. `loadUserByIdentifier(string $identifier):
@@ -278,7 +549,41 @@
   (AC-5 — case-insensitive matching at the query boundary; AC-1, AC-3 —
   this is the lookup every sign-in attempt goes through.)
 
-- [ ] 12. **Rewrite `config/packages/security.yaml` for the real firewall.**
+  **Done 2026-08-18.** `src/Repository/UserRepository.php` (created bare in
+  Task 5, given its behavior here) now implements `UserLoaderInterface` and
+  `PasswordUpgraderInterface`.
+
+  **Correction to the task text:** `UserLoaderInterface` is **not** in
+  `Symfony\Component\Security\Core\User` — that namespace has no such
+  interface in Symfony 8.1, and referencing it produced
+  `Error: Interface "…\Core\User\UserLoaderInterface" not found` at
+  container compile time. The correct FQCN is
+  `Symfony\Bridge\Doctrine\Security\User\UserLoaderInterface`, which is
+  consistent with Task 2's finding that the `entity` provider ships in
+  doctrine-bridge.
+
+  `loadUserByIdentifier()` normalizes through `User::normalizeEmail()` (the
+  same static the entity uses, not a re-implementation) and then does a plain
+  equality lookup, so it uses `uniq_app_user_email`. A `LOWER(email) = :x`
+  predicate would have been correct too but cannot use that index and would
+  make every sign-in a sequential scan; relying on input normalization is safe
+  precisely because `app_user_email_lower_ck` makes an unnormalized row
+  impossible. `upgradePassword()` preserves the existing
+  `password_changed_at` — a rehash under new hasher parameters is not a
+  password change, and overwriting it would corrupt the timestamp the reset
+  flow reasons about.
+
+  `tests/Repository/UserRepositoryTest.php` is a real integration test against
+  `app_test`, isolated by a per-test transaction rolled back in `tearDown()`
+  (doctrine-test-bundle is not a project dependency; this is the same
+  isolation by hand). It covers the spec's normalization edge case through a
+  data provider — `ann@x.com`, `Ann@x.com`, `Ann@x.com ` (trailing space),
+  `  ANN@X.COM  ` — plus unknown-account null, normalization on persist, and
+  the password upgrade round-trip. **7 tests, 17 assertions, green.**
+  Note it must be run in the container (`docker compose exec -T php php
+  bin/phpunit …`) — the host PHP has no `pdo_pgsql`.
+
+- [x] 12. **Rewrite `config/packages/security.yaml` for the real firewall.**
   Replace the Flex default wholesale, using only keys Task 2 confirmed:
   `password_hashers: { Symfony\Component\Security\Core\User\
   PasswordAuthenticatedUserInterface: 'auto' }` (keep the existing
@@ -318,7 +623,40 @@
   enables; AC-16, AC-17, AC-18 — `role_hierarchy` and `access_control`;
   AC-21 — `enable_csrf` on both `form_login` and `logout`.)
 
-- [ ] 13. **Configure session cookie flags and the idle-timeout parameter.**
+  **Done 2026-08-18.** `config/packages/security.yaml` rewritten; the
+  `when@test` cost-reduction block was kept verbatim, and the `dev` firewall
+  kept as-is.
+
+  **Resolved the alternative the task left open: the entity provider is
+  declared with NO `property` key.** Task 2 confirmed that is exactly the mode
+  in which `EntityUserProvider` delegates to
+  `UserRepository::loadUserByIdentifier()`. `property: email` would do the
+  opposite — compare the raw typed identifier against the stored column, so
+  `Ann@X.com` would not match the stored `ann@x.com` and AC-5 would fail at
+  the firewall even though the repository handles it correctly.
+
+  **Sequencing deviation, deliberate.** The task anticipated a red
+  `lint:container` between Tasks 12 and 22 because it wires three
+  not-yet-existing classes. Instead:
+  - `user_checker: App\Security\AccountStatusChecker` is wired here, with
+    Task 14's class landed alongside it — the option the task itself
+    preferred.
+  - `form_login.failure_handler` and `login_throttling.limiter` are **not**
+    written here. Task 16 and Task 22 each add their own line when they create
+    the class it names. The end state is identical to what this task
+    specifies, but the container stays lintable and the whole test suite stays
+    runnable at every intermediate step, instead of going dark for ten tasks.
+    **Tasks 16 and 22 must not skip their config line.**
+
+  Everything else landed as written: flat `role_hierarchy` (each of the four
+  roles to `[ROLE_USER]`, no cross-role inheritance), and `access_control` in
+  the specified order with the `^/` catch-all last.
+  Verify: `lint:yaml` OK; **`lint:container` OK already** — the forward
+  references that would have broken it were the two deferred lines.
+  (The `app_login`/`app_logout`/`app_home` route names it references are
+  resolved at runtime, not at lint time; Task 20 creates them.)
+
+- [x] 13. **Configure session cookie flags and the idle-timeout parameter.**
   Edit `config/packages/framework.yaml`: under `framework.session`, set
   `cookie_secure: auto`, `cookie_httponly: true`, `cookie_samesite: lax`,
   `cookie_lifetime: 0`, `gc_maxlifetime: 28800`. Add a `when@prod` block
@@ -335,7 +673,23 @@
   (AC-7 — cookie flags and the idle-seconds value that Task 18's subscriber
   reads.)
 
-- [ ] 14. **`AccountStatusChecker` — the Active + verified gate in
+  **Done 2026-08-18.** `config/packages/framework.yaml` sets
+  `cookie_secure: auto`, `cookie_httponly: true`, `cookie_samesite: lax`,
+  `cookie_lifetime: 0`, `gc_maxlifetime: 28800` under `framework.session`, and
+  a new `when@prod` block sets `cookie_name: __Host-SESSID` (prod-only because
+  `__Host-` requires HTTPS, which dev and test do not have — elsewhere the
+  browser would reject the cookie and no one could stay signed in). Task 2
+  confirmed all five keys and both enum domains.
+  The parameter went into `config/services.yaml`'s `parameters:` block, the
+  task's stated default; Task 2's notes gave no reason to prefer a new
+  `app.yaml`.
+  Note `cookie_secure: auto` is a second reason Task 3 had to land first —
+  behind nginx the request only *looks* secure once `X-Forwarded-Proto` is
+  honoured.
+  Verify: `lint:yaml` OK on both files;
+  `debug:container --parameter=app.session_idle_seconds` prints `28800`.
+
+- [x] 14. **`AccountStatusChecker` — the Active + verified gate in
   `checkPostAuth()`.**
   New file `src/Security/AccountStatusChecker.php` implementing
   `UserCheckerInterface`. `checkPreAuth()` is empty (deliberately — see
@@ -358,7 +712,29 @@
   (AC-1, AC-2 — the two rejectable-but-existing-account facts, kept
   distinct server-side.)
 
-- [ ] 15. **`LoginTimingPaddingSubscriber` — equalize the unknown-account
+  **Done 2026-08-18.** `src/Security/AccountStatusChecker.php` plus
+  `src/Security/Exception/{AccountDeactivatedException,EmailNotVerifiedException}.php`,
+  both extending `CustomUserMessageAccountStatusException` with distinct class
+  identity so Task 34 can tell them apart while Task 16 collapses their
+  message. `checkPreAuth()` is empty, with the reason in the docblock rather
+  than left as a bare stub.
+
+  **Correction to the task text:** `UserCheckerInterface::checkPostAuth()` in
+  Symfony 8.1 is
+  `checkPostAuth(UserInterface $user, ?TokenInterface $token = null): void` —
+  the second parameter is required in the signature
+  (`vendor/symfony/security-core/User/UserCheckerInterface.php:39`), not the
+  one-argument form the task shows.
+
+  Two additions beyond the task's three cases, both to stop the test passing
+  for the wrong reason: deactivation is asserted to be reported *ahead of*
+  verification when both apply (so a deactivated account never leaks the
+  second fact), and a foreign user class (`InMemoryUser`) is asserted to pass
+  through rather than fatal — the checker is registered firewall-wide.
+  Verify: **18 tests, 9 assertions, green** (the three main cases run across
+  all four roles via a data provider).
+
+- [x] 15. **`LoginTimingPaddingSubscriber` — equalize the unknown-account
   timing cost.**
   New file `src/EventSubscriber/LoginTimingPaddingSubscriber.php`,
   subscribing to `LoginFailureEvent`. When
@@ -380,7 +756,42 @@
   timing"; a statistical cross-path timing test is Task 17's job, this
   task proves the mechanism fires.)
 
-- [ ] 16. **`UniformAuthenticationFailureHandler` — one message, every
+  **Done 2026-08-18.** `src/EventSubscriber/LoginTimingPaddingSubscriber.php`.
+
+  **The exception shape the task told us to determine empirically, resolved
+  from the installed source rather than guessed:**
+  `AuthenticatorManager::handleAuthenticationFailure()`
+  (`vendor/symfony/security-http/Authentication/AuthenticatorManager.php:252`)
+  wraps the original in `new BadCredentialsException('Bad credentials.', 0,
+  $original)` whenever `isSensitiveException()` is true, and that is true for
+  `UserNotFoundException` under any `expose_security_errors` except `All`
+  (line 270). The bundle's default is `None`
+  (`MainConfiguration.php:65-69`), so in this app **the cause is
+  `$event->getException()->getPrevious()`**. The subscriber accepts the
+  top-level shape too, so the protection does not silently vanish if that
+  setting is ever changed — and both shapes are covered by tests.
+
+  Worth noting for Task 34: our own `AccountDeactivatedException` and
+  `EmailNotVerifiedException` are **not** wrapped, because line 274 exempts
+  `CustomUserMessageAccountStatusException`. They arrive at the top level.
+
+  The dummy hash is built once at construction from the *configured* hasher,
+  so it tracks the real algorithm and cost automatically, including the
+  reduced `when@test` cost — the padding stays honest without slowing the
+  suite. A test pins that construction-time behavior, because hashing per
+  failure would make the padded path the slow one and just flip the sign of
+  the signal.
+  Verify: **5 tests, 5 assertions, green** — wrapped unknown account pads,
+  unwrapped unknown account pads, known-account failure does not pad again
+  (that cost already happened in `CheckCredentialsListener`), subscription
+  registered, hash computed once.
+
+  Note the test was rewritten once to use `createStub()` for the
+  collaborators that carry no expectations: PHPUnit 13 emits a notice for
+  mocks without expectations, and `phpunit.dist.xml` sets
+  `failOnNotice="true"`.
+
+- [x] 16. **`UniformAuthenticationFailureHandler` — one message, every
   path.**
   New file `src/Security/UniformAuthenticationFailureHandler.php`
   implementing `AuthenticationFailureHandlerInterface`.
@@ -398,7 +809,30 @@
   Task 12 now if not already done there.
   (AC-2 — the message half.)
 
-- [ ] 17. **Sign-in matrix functional test.**
+  **Done 2026-08-18.** `src/Security/UniformAuthenticationFailureHandler.php`
+  returns a 303 redirect to `app_login` with the single flash
+  `'Invalid email or password.'` (exposed as `FAILURE_MESSAGE` so tests assert
+  against the constant, not a copy of the string). The exception's concrete
+  type is never consulted — not narrowed, not mapped, not logged here — since
+  any branch on it is a channel for learning which accounts exist. It also
+  deliberately does **not** store the exception in the session the way
+  Symfony's default handler does, which would let the login template render a
+  cause-specific message and undo the whole thing.
+
+  **`failure_handler` is now wired into `security.yaml`'s `form_login`
+  block**, closing the first of the two lines Task 12 deferred.
+  `lint:yaml` and `lint:container` both green.
+
+  `tests/Security/UniformAuthenticationFailureHandlerTest.php` goes past
+  asserting each cause against a fixed expectation: it collects the response
+  signature (status, redirect target, flash bag) for all four causes and
+  asserts `array_unique` over them has exactly **one** element. A change that
+  made one cause differ would have to be replicated four times to escape the
+  test. A third test asserts the message text contains none of "deactivated",
+  "verif", "not found", "unknown", "no such".
+  Verify: **6 tests, 23 assertions, green.**
+
+- [x] 17. **Sign-in matrix functional test.**
   New file `tests/Functional/SignInTest.php`, using `UserFactory` (Task 10)
   to seed one user per case: correct password (expect redirect to the
   role's dashboard per Task 20 — acceptable to assert only "not the login
@@ -417,6 +851,60 @@
   a timing test and flakiness must be triaged, not ignored, per AGENTS.md's
   Failure Handling steps.
   (AC-1, AC-2, AC-3 — end-to-end proof of the whole gate.)
+
+  **Done 2026-08-18.** `tests/Functional/SignInTest.php` — **10 tests, 29
+  assertions, green**, and green on repeated runs.
+
+  **Gap in the plan, filled here: no task owned the `/login` route.** Tasks 12
+  and 16 both reference `app_login`, Task 37 does the form *theme*, but
+  nothing created the controller or template, so this test could not run at
+  all. Added `src/Controller/SecurityController.php` (`app_login` GET|POST,
+  `app_logout` POST as the route the firewall intercepts) and
+  `templates/security/login.html.twig`. Note the controller deliberately does
+  **not** use `AuthenticationUtils::getLastAuthenticationError()`, the Symfony
+  default: that helper surfaces the exception's own message, and the four
+  causes have different messages, so rendering it would quietly undo Task 16.
+  The uniform message reaches the page as a flash instead. Task 37 restyles
+  this template; it must not reintroduce `getLastAuthenticationError()`.
+
+  **Three defects this task's tests caught, all real:**
+
+  1. **Kernel reboot broke fixture visibility.** `WebTestCase` reboots the
+     kernel between requests, so each request got a *fresh* Doctrine
+     connection that could not see the uncommitted fixture rows. Every sign-in
+     failed as "unknown account" — and, worse, the four failure assertions
+     still passed, because all four causes had collapsed into the same one.
+     Fixed with `$client->disableReboot()`, with the reason recorded in the
+     test. **Every functional test that seeds data must do the same** (Task 20
+     already does).
+  2. **The timing test caught a genuine 40x signal**, exactly the thing it
+     exists to catch: unknown email returned in 5.4 ms against 218 ms for a
+     wrong password. Root cause was in the fixtures, not the subscriber —
+     `UserFactory` hashed at full production strength while the app's
+     `when@test` hasher is configured cheap (`time_cost: 3`,
+     `memory_cost: 10`), so verifying a real account cost ~40x what the
+     padding could ever cost. Fixed by giving `UserFactory` the same reduced
+     parameters, with a comment on both sides tying them together. This is a
+     test-only artifact: in production both paths use `auto` at full strength
+     and already matched. After the fix the ratio is within tolerance.
+  3. `default_target_path: app_home` needed Task 20's route to exist; the
+     success case failed with `Unable to generate a URL for the named route
+     "app_home"` until Task 20 landed.
+
+  **Deviation from the task's tolerance instruction, deliberate:** medians
+  rather than means, and a **3x** bound rather than a small percentage. This
+  runs on shared hardware where scheduling noise dwarfs the effect; a tight
+  bound produces flakes that get muted rather than triaged, which is worse
+  than no test. What the bound must catch is the padding being *removed* — an
+  order-of-magnitude gap — and it demonstrably does: the pre-fix state failed
+  it at 40.6x. The reasoning is in the test's docblock so a future reader does
+  not "tighten" it back into flakiness.
+
+  Also asserted beyond the task text: that no failure cause produces an
+  authenticated token (so "uniform response" cannot be satisfied by uniformly
+  *succeeding*), and the four causes compared against each other via
+  `array_unique` over their response signatures rather than each against a
+  fixed expectation.
 
 - [ ] 18. **`SessionIdleSubscriber` — deterministic 8-hour inactivity
   expiry.**
@@ -446,7 +934,7 @@
   Verify: `php bin/phpunit tests/Functional/LogoutAndSessionRegenerationTest.php`.
   (AC-6, AC-8.)
 
-- [ ] 20. **`RoleLandingResolver`, `HomeController`, and the four dashboard
+- [x] 20. **`RoleLandingResolver`, `HomeController`, and the four dashboard
   controllers.**
   New file `src/Security/RoleLandingResolver.php`: one method
   `routeFor(UserRole $role): string` returning `admin_dashboard`,
@@ -472,6 +960,26 @@
   bin/console debug:router | grep -E 'app_home|admin_dashboard|trainer_dashboard|coach_dashboard|player_dashboard'`
   shows all five routes.
   (AC-16, AC-17.)
+
+  **Done 2026-08-18.** `src/Security/RoleLandingResolver.php` (a `match` that
+  is total over `UserRole`, so a fifth role becomes a visible gap here rather
+  than a silent fall-through), `src/Controller/HomeController.php`, and the
+  four controllers under `src/Controller/Dashboard/` with minimal templates
+  under `templates/dashboard/`. Each dashboard template carries the CSRF-token
+  logout form, so Task 19 has something to exercise.
+  `debug:router` shows all five routes: `app_home`, `admin_dashboard`,
+  `trainer_dashboard`, `coach_dashboard`, `player_dashboard`.
+
+  `tests/Functional/RoleLandingTest.php` — **17 tests, 50 assertions, green.**
+  The AC-17 case is generated as **all twelve** role x foreign-dashboard
+  pairs rather than the single `ROLE_PLAYER -> /admin` case the task names, so
+  no combination is left to chance. Each pair asserts, in one test as the task
+  required, both that the role's own dashboard renders no link to the foreign
+  path *and* that requesting that path directly returns 403 — the failure
+  message spells out that a passing link-absence check with a failing refusal
+  means the missing link was the only thing stopping them. Added beyond the
+  task: an anonymous request to `/` redirects to `/login`, which is the
+  catch-all `access_control` rule seen from the other side.
 
 - [ ] 21. **Router-sweep test for default-deny (AC-18).**
   New file `tests/Functional/RouterSweepTest.php`: read every registered
@@ -1022,3 +1530,262 @@ Before merge/PR (Full tier), additionally:
 - Confirm the S2 handoff note from the architecture's AC-13 risk ("account
   creation must call `issue()`") is recorded somewhere S2's own spec pass
   will read — not silently dropped between slices.
+
+---
+
+## Config verification notes (Task 2)
+
+*Verified 2026-08-18 against the **installed** `vendor/` tree (Symfony v8.1.4,
+`symfonycasts/reset-password-bundle` v1.25.0, PHP 8.5.9). Every key below was
+read from the cited file; nothing here comes from memory. There is no
+`security-1.0.xsd` in this installation — SecurityBundle ships only PHP
+configuration classes, so those are the authority.*
+
+### `security.firewalls.<name>.form_login`
+
+Options come from two places: `FormLoginFactory::__construct()` and
+`AbstractFactory::addConfiguration()`.
+
+`vendor/symfony/security-bundle/DependencyInjection/Security/Factory/FormLoginFactory.php:31-37`
+
+| Key | Default |
+|---|---|
+| `username_parameter` | `_username` |
+| `password_parameter` | `_password` |
+| `csrf_parameter` | `_csrf_token` |
+| `csrf_token_id` | `authenticate` |
+| `enable_csrf` | `false` |
+| `post_only` | `true` |
+| `form_only` | `false` |
+
+`vendor/symfony/security-bundle/DependencyInjection/Security/Factory/AbstractFactory.php:50-68`
+adds `provider`, `remember_me` (default `true`), `success_handler`,
+`failure_handler`, plus every key of `$defaultSuccessHandlerOptions`
+(lines 31-37: `always_use_default_target_path` `false`, `default_target_path`
+`/`, `login_path` `/login`, `target_path_parameter` `_target_path`,
+`use_referer` `false`) and `$defaultFailureHandlerOptions` (lines 39-44:
+`failure_path` `null`, `failure_forward` `false`, `login_path` `/login`,
+`failure_path_parameter` `_failure_path`).
+
+**Confirmed:** `check_path` and `login_path` are valid; a custom
+`failure_handler` service id is a first-class key (Task 16 needs no
+compiler-pass trickery).
+
+### `security.firewalls.<name>.login_throttling`
+
+`vendor/symfony/security-bundle/DependencyInjection/Security/Factory/LoginThrottlingFactory.php`
+
+| Key | Default |
+|---|---|
+| `limiter` | *(service id implementing `RequestRateLimiterInterface`)* |
+| `max_attempts` | `5` |
+| `interval` | `1 minute` |
+| `lock_factory` | `null` |
+| `cache_pool` | `cache.rate_limiter` |
+| `storage_service` | `null` |
+
+Task 22 may therefore either configure `max_attempts`/`interval` inline **or**
+point `limiter` at a custom service — both are supported keys.
+
+### `security.firewalls.<name>` (firewall level)
+
+`vendor/symfony/security-bundle/DependencyInjection/MainConfiguration.php:185-215`:
+`pattern`, `host`, `methods`, `security` (`true`), `user_checker`
+(`security.user_checker`), `request_matcher`, `access_denied_url`,
+`access_denied_handler`, `entry_point`, `provider`, `stateless` (`false`),
+`lazy` (`false`), `context`. Also `switch_user` and `required_badges`
+(lines 268-300).
+
+**Confirmed:** `user_checker` is a firewall-level scalar — Task 14's
+`AccountStatusChecker` wires in by service id, no decoration needed.
+
+### `security.firewalls.<name>.logout`
+
+`MainConfiguration.php:214-266`
+
+| Key | Default |
+|---|---|
+| `enable_csrf` | `null` |
+| `csrf_token_id` | `logout` |
+| `csrf_parameter` | `_csrf_token` |
+| `csrf_token_manager` | *(unset)* |
+| `path` | `/logout` |
+| `target` | `/` |
+| `invalidate_session` | `true` |
+| `clear_site_data` | enum: `*`, `cache`, `cookies`, `storage`, `clientHints`, `executionContexts`, `prefetchCache`, `prerenderCache` |
+| `delete_cookies` | per-cookie `path`/`domain`/`secure`/`samesite`/`partitioned` |
+
+Note the `beforeNormalization` at lines 217-228: setting `csrf_token_manager`
+implies `enable_csrf: true`, and setting `enable_csrf: true` implies
+`csrf_token_manager: security.csrf.token_manager`. Task 12 sets
+`enable_csrf: true` and nothing else.
+
+### `security.access_control`
+
+`MainConfiguration.php:126-166`: `request_matcher`, `requires_channel`, `path`
+(**urldecoded** format), `host`, `port`, `ips`, `attributes`, `route`,
+`methods`, `allow_if`, `roles`. Task 20/21's default-deny entries use
+`path` + `roles`; `requires_channel: https` is available if S1 wants it.
+
+### `security.role_hierarchy`
+
+`MainConfiguration.php:110-124`: map of role id => list of roles; a
+comma-separated string is normalized to a list (line 118).
+
+### `security.password_hashers`
+
+`MainConfiguration.php:392-436`: keyed by class, value either the string
+`auto` or a map of `algorithm`, `migrate_from`, `hash_algorithm` (`sha512`),
+`key_length` (`40`), `ignore_case`, `encode_as_base64`, `iterations` (`5000`),
+`cost` (min 4, max 31), `memory_cost`, `time_cost`, `id`.
+
+### Entity user provider (`security.providers.<name>.entity`)
+
+`vendor/symfony/doctrine-bridge/DependencyInjection/Security/UserProvider/EntityFactory.php`
+
+| Key | Default |
+|---|---|
+| `class` | **required** |
+| `property` | `null` |
+| `manager_name` | `null` |
+
+**Confirmed for Task 11:** leaving `property` unset is exactly the mode in
+which `EntityUserProvider` delegates to the repository's
+`UserLoaderInterface::loadUserByIdentifier()`, which is what the architecture
+wants (`UserRepository` owns the lookup, so it can filter/normalize).
+
+### CSRF: `enable_csrf` × `csrf.yaml`'s `stateless_token_ids`
+
+`config/packages/csrf.yaml` lists `submit`, `authenticate`, `logout` — the
+same three ids `form_login` (`authenticate`) and `logout` (`logout`) use by
+default, so **no id needs overriding**; Tasks 12/31/37 just set
+`enable_csrf: true` on both and render the default `_csrf_token` field.
+
+How that field behaves is *not* the classic session-token flow. Per
+`vendor/symfony/framework-bundle/Resources/config/security_csrf.php:53-70`,
+`security.csrf.same_origin_token_manager` **decorates**
+`security.csrf.token_manager` for exactly the listed ids. In
+`vendor/symfony/security-csrf/SameOriginCsrfTokenManager.php`:
+
+- `getToken('authenticate')` returns a token whose **value is the cookie
+  name** (`csrf-token` by default) — line 88-94. So `csrf_token('authenticate')`
+  in Twig renders the literal string `csrf-token`, not a random token. This is
+  correct and expected; do not "fix" it.
+- `isTokenValid()` (lines 114-190) accepts when **either** the origin check
+  passes **or** a JS-set double-submit cookie/header matches; it rejects when
+  both are absent ("double-submit and origin info not found", line 146).
+- `isValidOrigin()` checks `Sec-Fetch-Site: same-origin`, else `Origin`, else
+  `Referer` against `getSchemeAndHttpHost()`.
+
+**Two consequences that later tasks must be written against:**
+
+1. Origin validation depends on `getSchemeAndHttpHost()` resolving correctly
+   behind nginx — this is a second, independent reason Task 3's
+   `trusted_proxies`/`trusted_headers` must land before any CSRF-protected
+   form is tested.
+2. In functional tests, `AbstractBrowser::request()`
+   (`vendor/symfony/browser-kit/AbstractBrowser.php:356-357`) sets
+   `HTTP_REFERER` from history whenever history is non-empty. So a test that
+   GETs the form and then submits it passes the origin check, while a bare
+   `$client->request('POST', ...)` on a fresh client has no history, no
+   Referer, and is **rejected**. Tasks 17, 19, 23, 28, 32, 33 must GET the page
+   first; Task 39's negative sweep gets its rejection for free from a
+   history-less client — and must assert the rejection is CSRF-caused, not
+   merely a 4xx from something else.
+
+### `framework.rate_limiter`
+
+`vendor/symfony/framework-bundle/DependencyInjection/Configuration.php:2586-2650`.
+The tree is `framework.rate_limiter.limiters.<name>` (a bare map directly
+under `rate_limiter` is normalized into `limiters`, lines 2589-2602).
+
+| Key | Default / values |
+|---|---|
+| `policy` | **required**, enum: `fixed_window`, `token_bucket`, `sliding_window`, `compound`, `no_limit` |
+| `limit` | integer |
+| `interval` | e.g. `15 minutes` (number + second/minute/hour/day/week/month) |
+| `rate.interval`, `rate.amount` | token_bucket only, `amount` default `1` |
+| `cache_pool` | `cache.rate_limiter` |
+| `lock_factory` | `auto` |
+| `storage_service` | `null` |
+| `limiters` | child limiter names, `compound` policy only |
+| `anchor_at` | aligns `fixed_window` to a calendar |
+
+**Correction for Task 22:** `AbstractRequestRateLimiter`
+(`vendor/symfony/http-foundation/RateLimiter/AbstractRequestRateLimiter.php`)
+has **no constructor** — it is abstract over one method,
+`protected function getLimiters(Request $request): array`, and implements
+`PeekableRequestRateLimiterInterface` (`consume()`, `peek()`, `reset()`). A
+custom login limiter injects its `RateLimiterFactory` instances through its
+**own** constructor and returns configured limiters from `getLimiters()`.
+`RequestRateLimiterInterface` itself is only `consume(Request): RateLimit` and
+`reset(Request): void`.
+
+### `framework.messenger`
+
+`Configuration.php:1758-1810`. Per transport: `dsn`, `serializer` (`null`),
+`options` (map), `failure_transport` (`null`), `retry_strategy`, `rate_limiter`
+(`null`). `retry_strategy` children (lines 1790-1797): `service` (`null`),
+`max_retries` (`3`), `delay` (`1000` ms), `multiplier` (`2.0`), `max_delay`
+(`0` = infinite), `jitter` (`0.1`). A global `failure_transport` also exists at
+the `messenger` level (line 1806). `service` is mutually exclusive with the
+other four (lines 1780-1789 throw).
+
+The Flex recipe wrote `config/packages/messenger.yaml` with `sync: 'sync://'`
+and everything else commented out, and `.env` now has
+`MESSENGER_TRANSPORT_DSN=doctrine://default?auto_setup=0`. Task 29 owns
+uncommenting the `async`/`failed` transports and the
+`Symfony\Component\Mailer\Messenger\SendEmailMessage: async` routing entry —
+note `auto_setup=0` means the `messenger_messages` table must come from a
+migration, which Task 9 must account for.
+
+### `framework.session` cookie flags
+
+`Configuration.php:769-800`: `cookie_lifetime`, `cookie_path`,
+`cookie_domain`, `cookie_secure` (enum `true`/`false`/`auto`, default `auto`),
+`cookie_httponly` (`true`), `cookie_samesite` (enum `null`/`lax`/`strict`/
+`none`, default `lax`), `name`, `gc_maxlifetime`, `metadata_update_threshold`,
+`handler_id`, `storage_factory_id`, `save_path`. All of Task 13's intended
+flags exist; the secure/httponly/samesite defaults are already what S1 wants,
+so Task 13 sets them explicitly for the record rather than to change behavior.
+
+### `framework.trusted_proxies` / `trusted_headers`
+
+`Configuration.php:130-142`. `trusted_proxies` is a `variableNode` whose
+`beforeNormalization` (lines 131-134) expands the literal string
+`private_ranges` (or `PRIVATE_SUBNETS`) into `IpUtils::PRIVATE_SUBNETS`; its
+default is `'%env(default::SYMFONY_TRUSTED_PROXIES)%'`. `trusted_headers` is a
+list with default `'%env(default::SYMFONY_TRUSTED_HEADERS)%'`; a bare string is
+wrapped into a one-element list.
+
+**Note for Task 3:** the framework already reads `SYMFONY_TRUSTED_PROXIES` by
+default, and `private_ranges` expresses the Docker-bridge intent exactly
+without hand-copying CIDRs. Task 3 should prefer `private_ranges` over the
+literal `10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` the plan sketched, and may
+keep the `TRUSTED_PROXIES` env var name for explicitness.
+
+### `symfonycasts_reset_password`
+
+`vendor/symfonycasts/reset-password-bundle/src/DependencyInjection/Configuration.php:28-43`
+
+| Key | Default |
+|---|---|
+| `request_password_repository` | **required** |
+| `lifetime` | `3600` (seconds) |
+| `throttle_limit` | `3600` (seconds) |
+| `enable_garbage_collection` | `true` |
+
+The recipe-generated `config/packages/reset_password.yaml` currently points
+`request_password_repository` at `symfonycasts.reset_password.fake_request_repository`;
+Task 30 replaces it with `App\Repository\ResetPasswordRequestRepository`.
+
+### Keys that could NOT be confirmed
+
+None. Every key the plan's Tasks 12, 13, 22, 29 and 30 depend on was located
+in an installed source file above. The only corrections carried forward are:
+`AbstractRequestRateLimiter` having no constructor (Task 22), `rate_limiter`
+nesting under `limiters:` (Task 22), `trusted_proxies: private_ranges` being
+available (Task 3), the CSRF token value being the cookie name and origin
+validation being Referer-dependent in tests (Tasks 12, 17, 19, 23, 28, 31, 32,
+33, 37, 39), and `auto_setup=0` requiring a migrated `messenger_messages`
+table (Tasks 9, 29).

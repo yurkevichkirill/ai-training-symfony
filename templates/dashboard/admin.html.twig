@@ -1,0 +1,15 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Super Admin dashboard{% endblock %}
+
+{% block body %}
+    <main>
+        <h1>Super Admin dashboard</h1>
+        <p>Signed in as {{ app.user.email }}.</p>
+
+        <form method="post" action="{{ path('app_logout') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+            <button type="submit">Sign out</button>
+        </form>
+    </main>
+{% endblock %}
