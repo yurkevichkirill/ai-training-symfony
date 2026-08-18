@@ -18,3 +18,8 @@ __pycache__/
 memory-bank/local/
 .cursor/rules/working-memory.mdc
 # END ACCELERATOR MANAGED ENTRIES
+
+###> phpunit/phpunit ###
+/phpunit.xml
+/.phpunit.cache/
+###< phpunit/phpunit ###
