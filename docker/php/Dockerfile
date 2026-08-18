@@ -5,9 +5,11 @@ RUN apk add --no-cache \
         unzip \
         icu-dev \
         libzip-dev \
+        libpq-dev \
     && docker-php-ext-install -j"$(nproc)" \
         intl \
-        zip
+        zip \
+        pdo_pgsql
 
 COPY --from=composer:2.10 /usr/bin/composer /usr/bin/composer
 
