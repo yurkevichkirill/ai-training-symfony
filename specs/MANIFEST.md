@@ -10,12 +10,14 @@ An AI-assisted development accelerator for Symfony 7.4 LTS and Symfony 8.1 proje
 | api-designer-spec.md | Endpoints, schemas, authentication | architect-architecture | - |
 | frontend-design-spec.md | Pages, components, state management | architect-architecture, api-designer-spec | - |
 | docs-generator-implementation.md | Build process, deployment, tooling | - | - |
+| auth-foundation-spec.md | Epic-01 slice S1: core authentication and authorization (FR-001…FR-007) — problem, scenarios, AC-1…AC-24, edge cases, open questions | Task/Epics/Epic-01_User_Management_Authentication_SPEC.md, tasks/TASK-001/requirements-analyst-requirements.md | 2026-08-18 |
 
 ## Key Decisions
 
 - Target Symfony 7.4 LTS and Symfony 8.1 while detecting each consuming project's installed versions.
 - Use `.agents/skills` as the configured canonical source for shared skill parity, mirror Claude and Cursor semantics natively, and keep Codex support files under `.codex`.
 - Enforce Controller -> Service -> Repository pragmatically, without requiring pass-through layers or interfaces without a real boundary.
+- Deliver Epic-01 in the slices of its §13 implementation order, one spec pair per slice, starting with S1 (`auth-foundation`); TASK-001 is the governed task for S1.
 
 ## Tech Stack
 
