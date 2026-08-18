@@ -9,3 +9,12 @@
 /vendor/
 ###< symfony/framework-bundle ###
 .idea/
+
+# BEGIN ACCELERATOR MANAGED ENTRIES
+.worktrees/
+.DS_Store
+__pycache__/
+*.py[cod]
+memory-bank/local/
+.cursor/rules/working-memory.mdc
+# END ACCELERATOR MANAGED ENTRIES
