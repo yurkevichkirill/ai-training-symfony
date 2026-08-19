@@ -17,3 +17,35 @@ framework:
         # Namespaced pools use the above "app" backend by default
         #pools:
             #my.dedicated.cache: null
+
+        # Dedicated pool for the rate_limiter.yaml limiters (AC-19, AC-20).
+        # Explicit filesystem adapter rather than the implicit `cache.app`
+        # default, so a future change to the app pool (e.g. a Redis swap for
+        # unrelated reasons) cannot silently change rate-limiter storage too.
+        # Filesystem is correct for one node and wrong for several -- the
+        # architecture's Risks section accepts that for S1 and flags moving
+        # this pool to Redis as future work once a second node exists. Do
+        # not switch it here.
+        pools:
+            cache.rate_limiter:
+                adapter: cache.adapter.filesystem
+
+when@test:
+    framework:
+        cache:
+            pools:
+                # In-memory rather than the filesystem default above. A
+                # filesystem pool persists on disk *between separate phpunit
+                # process invocations*, so fixture-driven functional tests
+                # that submit many login attempts (e.g. SignInTest's timing
+                # comparison, which is deliberately dozens of failed
+                # attempts) would exhaust login_source's real 20/hour budget
+                # once and then fail every subsequent run for up to an hour,
+                # regardless of the code under test. The array adapter lives
+                # only as long as the container that created it, so each test
+                # gets the same clean-slate limiter state a fresh process
+                # would give it -- this does not weaken AC-19's production
+                # guarantee, which is unaffected since when@test never
+                # applies outside the test environment.
+                cache.rate_limiter:
+                    adapter: cache.adapter.array

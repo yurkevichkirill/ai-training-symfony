@@ -1,0 +1,46 @@
+{#
+ # Project form theme (AC-22): registered globally via
+ # config/packages/twig.yaml's `twig.form_themes`, so every Symfony Form in
+ # the project -- present and future -- renders through this, not by each
+ # template remembering to opt in.
+ #
+ # `form_row` is overridden (rather than left to the installed
+ # form_div_layout.html.twig default) so the aria-invalid / aria-describedby
+ # contract is this project's own, explicit commitment and does not silently
+ # depend on whatever a future Symfony upgrade's default theme happens to
+ # emit. It also adds the CSS hook classes and the icon-plus-text error
+ # styling that public/css/app.css relies on ("errors carried by text and
+ # icon, never colour alone").
+ #}
+{% extends 'form_div_layout.html.twig' %}
+
+{%- block form_row -%}
+    {%- set field_attr = {} -%}
+    {%- set aria_describedby = [] -%}
+    {%- if help -%}
+        {%- set aria_describedby = aria_describedby|merge([id ~ '_help']) -%}
+    {%- endif -%}
+    {%- if errors|length > 0 -%}
+        {%- set aria_describedby = aria_describedby|merge(errors|map((_, index) => id ~ '_error' ~ (index + 1))) -%}
+        {%- set field_attr = field_attr|merge({'aria-invalid': 'true'}) -%}
+    {%- endif -%}
+    {%- if aria_describedby|length > 0 -%}
+        {%- set field_attr = field_attr|merge({'aria-describedby': aria_describedby|join(' ')}) -%}
+    {%- endif -%}
+    <div class="form-row{% if errors|length > 0 %} form-row--invalid{% endif %}"{% with {attr: row_attr} %}{{ block('attributes') }}{% endwith %}>
+        {{- form_label(form) -}}
+        {{- form_errors(form) -}}
+        {{- form_widget(form, {attr: field_attr}) -}}
+        {{- form_help(form) -}}
+    </div>
+{%- endblock form_row -%}
+
+{%- block form_errors -%}
+    {%- if errors|length > 0 -%}
+    <ul class="field-errors">
+        {%- for error in errors -%}
+            <li id="{{ id ~ '_error' ~ loop.index }}">{{ error.message }}</li>
+        {%- endfor -%}
+    </ul>
+    {%- endif -%}
+{%- endblock form_errors -%}

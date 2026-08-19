@@ -1,5 +1,8 @@
 twig:
     file_name_pattern: '*.twig'
+    # AC-22: the accessible field-row contract (aria-invalid / aria-describedby)
+    # is applied to every Symfony Form project-wide, not opt-in per template.
+    form_themes: ['form/theme.html.twig']
 
 when@test:
     twig:

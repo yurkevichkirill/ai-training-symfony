@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Repository;
 
 use App\Entity\User;
+use App\Enum\UserRole;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
 use Doctrine\Persistence\ManagerRegistry;
 use Symfony\Bridge\Doctrine\Security\User\UserLoaderInterface;
@@ -43,6 +44,23 @@ class UserRepository extends ServiceEntityRepository implements UserLoaderInterf
     public function loadUserByIdentifier(string $identifier): ?UserInterface
     {
         return $this->findOneBy(['email' => User::normalizeEmail($identifier)]);
+    }
+
+    /**
+     * Whether any account already holds the given role -- used by
+     * `CreateSuperAdminCommand` (Task 36, AC-25) to decide whether creating a
+     * Super Admin needs an explicit confirmation/`--force`, since that
+     * command doubles as the "every Super Admin was lost" recovery path.
+     */
+    public function existsWithRole(UserRole $role): bool
+    {
+        return null !== $this->createQueryBuilder('u')
+            ->select('1')
+            ->andWhere('u.role = :role')
+            ->setParameter('role', $role)
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
     }
 
     /**

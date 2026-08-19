@@ -1,0 +1,49 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}
+    {%- if state == 'success' -%}
+        Email verified
+    {%- elseif state == 'expired' -%}
+        Verification link expired
+    {%- elseif state == 'already_consumed' -%}
+        Verification link already used
+    {%- else -%}
+        Verification link invalid
+    {%- endif -%}
+{% endblock %}
+
+{% block h1 %}
+    {%- if state == 'success' -%}
+        Email verified
+    {%- elseif state == 'expired' -%}
+        Verification link expired
+    {%- elseif state == 'already_consumed' -%}
+        Verification link already used
+    {%- else -%}
+        Verification link invalid
+    {%- endif -%}
+{% endblock %}
+
+{% block body %}
+    {% if state == 'success' %}
+        <p role="status" class="status-message">Your email address has been verified. You can now sign in.</p>
+        <ul class="link-list">
+            <li><a href="{{ path('app_login') }}">Go to sign in</a></li>
+        </ul>
+    {% elseif state == 'expired' %}
+        <p role="alert" class="alert-message">This verification link has expired. Request a new one below.</p>
+        <ul class="link-list">
+            <li><a href="{{ path('app_verify_email_resend') }}">Resend verification email</a></li>
+        </ul>
+    {% elseif state == 'already_consumed' %}
+        <p role="alert" class="alert-message">This verification link has already been used. Request a new one below.</p>
+        <ul class="link-list">
+            <li><a href="{{ path('app_verify_email_resend') }}">Resend verification email</a></li>
+        </ul>
+    {% else %}
+        <p role="alert" class="alert-message">This verification link is invalid. Request a new one below.</p>
+        <ul class="link-list">
+            <li><a href="{{ path('app_verify_email_resend') }}">Resend verification email</a></li>
+        </ul>
+    {% endif %}
+{% endblock %}

@@ -1,0 +1,141 @@
+{
+  "created_at": "2026-08-19T07:11:51.260778+00:00",
+  "escalation_reason": null,
+  "excluded": [
+    {
+      "path": "project-brain/control/handoffs/20f7db71-6ac3-41ae-80f1-34c5d826a867.md",
+      "reason": "lifecycle"
+    },
+    {
+      "path": "project-brain/dynamic/tasks/20f7db71-6ac3-41ae-80f1-34c5d826a867.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": "tasks/TASK-001/requirements-analyst-requirements.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": "tasks/README.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/SKILL FLOW.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/review-pr/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/test-generator/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/brainstorming/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/wcag-accessibility/rules/moc-semantic.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/memory/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/using-git-worktrees/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/memory-bank/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/wcag-accessibility/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/documentation-generator/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/project-brain/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/checkpoint/SKILL.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": "AGENTS.md",
+      "reason": "layer-limit"
+    },
+    {
+      "path": ".claude/skills/skill-creator/SKILL.md",
+      "reason": "layer-limit"
+    }
+  ],
+  "filters": {
+    "active_only": true,
+    "authority": [
+      "observed",
+      "verified"
+    ],
+    "freshness": true,
+    "owners": [
+      "*"
+    ],
+    "privacy": [
+      "public",
+      "team"
+    ]
+  },
+  "id": "a62dbb04-d990-4ff3-b3d4-b6978f055de0",
+  "provider": "sqlite-fts5",
+  "query": "auth foundation task status",
+  "schema_version": 1,
+  "selected": [
+    {
+      "category": "policy",
+      "estimated_tokens": 58,
+      "path": ".claude/skills/wcag-accessibility/rules/moc-forms.md",
+      "source_hash": "3322b778763ef35df3a41c7f1a5e4660583ea674e1bfc1649816b23c80621d8c"
+    },
+    {
+      "category": "policy",
+      "estimated_tokens": 109,
+      "path": ".claude/skills/requirements-analyst/SKILL.md",
+      "source_hash": "f7b3d06970a6433f16caa84716de360c742d28cccdff90d6fcebe0591d6b8406"
+    },
+    {
+      "category": "evidence",
+      "estimated_tokens": 62,
+      "path": "specs/auth-foundation-architecture.md",
+      "source_hash": "cf8bd9e52e1eecdf79ab1661f3f95af48555b2f318cd4861946d7d50ddb61292"
+    },
+    {
+      "category": "evidence",
+      "estimated_tokens": 70,
+      "path": "specs/MANIFEST.md",
+      "source_hash": "98b717e3757a72aaf8b8ac2e1afd58d1330ea6efb340aecc9a543945fb633a34"
+    },
+    {
+      "category": "evidence",
+      "estimated_tokens": 70,
+      "path": "tasks/TASK-001/writing-plans-plan.md",
+      "source_hash": "0e55c773c63dd256e381fb555538db5afc68d677b38e0c9a69a2dda0d91e8cbd"
+    }
+  ],
+  "task_id": "20f7db71-6ac3-41ae-80f1-34c5d826a867",
+  "task_revision": 15,
+  "token_estimates": {
+    "durable": 0,
+    "dynamic": 0,
+    "evidence": 202,
+    "handoff": 0,
+    "hard": 12000,
+    "policy": 167,
+    "target": 8000,
+    "total": 369
+  }
+}

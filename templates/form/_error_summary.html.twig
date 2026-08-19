@@ -1,0 +1,40 @@
+{#
+ # Error-summary macro (AC-22): a `role="alert"` box at the top of a form,
+ # linking to every offending field by its actual rendered id -- read from
+ # `form.vars.id`/`child.vars.id` directly rather than assumed, so the anchor
+ # always matches what templates/form/theme.html.twig actually renders.
+ #
+ # `items()` recurses into compound fields (e.g. `ChangePasswordFormType`'s
+ # `RepeatedType`, whose validator maps every error onto the *first* child --
+ # see that FormType's own docblock) so a nested field's error still surfaces
+ # here, anchored at its real id. A form-level (non-field) error -- e.g. a
+ # rejected CSRF token, which SymfonyCasts and Symfony Form both attach to
+ # the root form, not to any single field -- renders as plain text with no
+ # anchor, since there is no single offending field to point at.
+ #}
+{% macro summary(form) %}
+    {% import _self as macros %}
+    {% set rows %}{{ macros.items(form) }}{% endset %}
+    {% if rows|trim is not empty %}
+        <div class="error-summary" role="alert">
+            <p class="error-summary__title">Please fix the following before continuing:</p>
+            <ul>
+                {{ rows|raw }}
+            </ul>
+        </div>
+    {% endif %}
+{% endmacro %}
+
+{% macro items(form) %}
+    {% import _self as macros %}
+    {% for error in form.vars.errors %}
+        {% if form.parent is null %}
+            <li>{{ error.message }}</li>
+        {% else %}
+            <li><a href="#{{ form.vars.id }}">{{ (form.vars.label ?? form.vars.name)|capitalize }}: {{ error.message }}</a></li>
+        {% endif %}
+    {% endfor %}
+    {% for child in form.children %}
+        {{ macros.items(child) }}
+    {% endfor %}
+{% endmacro %}

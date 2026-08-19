@@ -1,0 +1,289 @@
+/*
+ * Auth Foundation (Epic-01 slice S1) shared stylesheet.
+ *
+ * Structural accessibility contract for AC-22 / AC-23, backing
+ * templates/base.html.twig and templates/form/theme.html.twig. Colour and
+ * spacing choices are deliberate, not decorative -- see
+ * tasks/TASK-001/writing-plans-plan.md Task 37's note for the computed
+ * WCAG 2.1 contrast ratio behind every pair used below (all comfortably
+ * clear ≥4.5:1 for body text and ≥3:1 for the focus outline / UI borders,
+ * against every background it is actually painted on in this stylesheet).
+ */
+
+:root {
+    color-scheme: light;
+
+    /* #1a1a1a on #ffffff = 17.4:1 */
+    --color-bg: #ffffff;
+    --color-text: #1a1a1a;
+    /* #4b4b4b on #ffffff = 8.72:1 */
+    --color-text-muted: #4b4b4b;
+
+    /* #0b5fae used as link/button-fill/focus-ring colour.
+       vs #ffffff = 6.44:1, vs #fdecea = 5.63:1, vs #eaf2fb = 5.70:1 --
+       every background this colour is ever drawn over in this file clears
+       the ≥3:1 non-text / focus-indicator floor with room to spare. */
+    --color-primary: #0b5fae;
+    --color-primary-contrast: #ffffff;
+    --color-focus: #0b5fae;
+
+    /* #6b6b6b on #ffffff = 5.33:1 (control borders, ≥3:1 non-text floor) */
+    --color-border: #6b6b6b;
+
+    /* Inline field-level error text: #b3261e on #ffffff = 6.54:1 */
+    --color-error: #b3261e;
+    --color-error-border: #b3261e;
+    /* Error-summary box: #601410 on #fdecea = 11.44:1 */
+    --color-error-strong: #601410;
+    --color-error-bg: #fdecea;
+
+    /* Status/info box: #1a1a1a on #eaf2fb = 15.41:1 */
+    --color-status-bg: #eaf2fb;
+
+    --space-1: 0.5rem;   /* 8px  -- the minimum inter-control spacing */
+    --space-2: 1rem;
+    --space-3: 1.5rem;
+    --radius: 6px;
+    --max-width: 30rem;  /* holds a single column comfortably at 320px */
+    --min-target: 44px;  /* WCAG 2.5.8 / 2.5.5 target size */
+}
+
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+html {
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 1rem;
+    line-height: 1.5;
+}
+
+/* Visible only when focused -- lets a keyboard user jump past repeated
+   chrome straight to the main landmark. */
+.skip-link {
+    position: absolute;
+    left: var(--space-1);
+    top: -3rem;
+    z-index: 100;
+    background: var(--color-primary);
+    color: var(--color-primary-contrast);
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius);
+    text-decoration: none;
+    transition: top 0.1s ease-in-out;
+}
+
+.skip-link:focus {
+    top: var(--space-1);
+}
+
+/* Single-column layout that holds at a 320px viewport: max-width caps the
+   line length on wide screens, and the horizontal padding is smaller than
+   the smallest supported viewport minus itself, so nothing ever forces a
+   horizontal scrollbar. */
+main.page {
+    width: 100%;
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: var(--space-3) var(--space-2);
+}
+
+h1 {
+    font-size: 1.5rem;
+    line-height: 1.25;
+    margin: 0 0 var(--space-2);
+}
+
+p {
+    margin: 0 0 var(--space-2);
+}
+
+a {
+    color: var(--color-primary);
+    text-decoration: underline;
+}
+
+/* Focus visibility (AC-22): a 3px solid ring, offset 2px so it is always
+   drawn over the page background rather than over a control's own fill --
+   see the header note above for why that keeps every ring at ≥3:1. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 2px;
+}
+
+label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.form-row {
+    margin-bottom: var(--space-2);
+}
+
+input[type="email"],
+input[type="password"],
+input[type="text"] {
+    display: block;
+    width: 100%;
+    min-height: var(--min-target);
+    padding: 0.625rem 0.75rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-size: 1rem;
+    font-family: inherit;
+}
+
+input[aria-invalid="true"] {
+    border-color: var(--color-error-border);
+    border-width: 2px;
+}
+
+.help-text {
+    display: block;
+    color: var(--color-text-muted);
+    font-size: 0.875rem;
+    margin-top: 0.25rem;
+}
+
+/* Field-level errors: text plus a leading "!" glyph, so the error is never
+   carried by colour alone. */
+.field-errors {
+    list-style: none;
+    margin: 0.375rem 0 0;
+    padding: 0;
+    color: var(--color-error);
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.field-errors li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.375rem;
+}
+
+.field-errors li::before {
+    content: "!";
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    width: 1.125rem;
+    height: 1.125rem;
+    border-radius: 50%;
+    background: var(--color-error);
+    color: var(--color-primary-contrast);
+    font-size: 0.75rem;
+    line-height: 1;
+}
+
+button,
+.button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: var(--min-target);
+    min-width: var(--min-target);
+    padding: 0.625rem 1.25rem;
+    margin: 0;
+    background: var(--color-primary);
+    color: var(--color-primary-contrast);
+    border: 2px solid transparent;
+    border-radius: var(--radius);
+    font-size: 1rem;
+    font-weight: 600;
+    font-family: inherit;
+    line-height: 1.25;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+button:hover,
+.button:hover {
+    filter: brightness(1.1);
+}
+
+/* Any run of stacked buttons/links that act as controls: ≥8px gap between
+   them (--space-1), so adjacent targets never touch. */
+.actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+}
+
+.link-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-top: var(--space-2);
+    padding: 0;
+    list-style: none;
+}
+
+.link-list a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--min-target);
+}
+
+.error-summary {
+    border: 2px solid var(--color-error-border);
+    background: var(--color-error-bg);
+    color: var(--color-error-strong);
+    border-radius: var(--radius);
+    padding: var(--space-2);
+    margin-bottom: var(--space-2);
+}
+
+.error-summary__title {
+    font-weight: 700;
+    margin: 0 0 0.5rem;
+}
+
+.error-summary ul {
+    margin: 0;
+    padding-left: 1.25rem;
+}
+
+.error-summary a {
+    color: var(--color-error-strong);
+    font-weight: 600;
+}
+
+.status-message,
+.alert-message {
+    border: 2px solid var(--color-primary);
+    background: var(--color-status-bg);
+    padding: var(--space-2);
+    border-radius: var(--radius);
+    margin-bottom: var(--space-2);
+}
+
+.alert-message {
+    border-color: var(--color-error-border);
+    background: var(--color-error-bg);
+    color: var(--color-error-strong);
+}
+
+.meta {
+    color: var(--color-text-muted);
+}

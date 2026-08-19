@@ -1,0 +1,27 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}{% if submitted %}Check your email{% else %}Resend verification email{% endif %}{% endblock %}
+
+{% block h1 %}{% if submitted %}Check your email{% else %}Resend verification email{% endif %}{% endblock %}
+
+{% block body %}
+    {% if submitted %}
+        <p role="status" class="status-message">
+            If that address matches an account that still needs verifying, we've sent a
+            new verification link. It expires in 24 hours.
+        </p>
+    {% else %}
+        <p>Enter your email address and we'll send a new verification link if it's needed.</p>
+
+        {{ form_start(form) }}
+            {{ error_summary.summary(form) }}
+            {{ form_row(form.email, {
+                attr: {autocomplete: 'email', inputmode: 'email'},
+            }) }}
+            <div class="actions">
+                <button type="submit">Send verification link</button>
+            </div>
+        {{ form_end(form) }}
+    {% endif %}
+{% endblock %}

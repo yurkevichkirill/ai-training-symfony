@@ -41,7 +41,16 @@ when@prod:
             # cannot set it. It requires HTTPS, which dev and test do not have,
             # so it is production-only -- elsewhere the browser would reject the
             # cookie outright and no one could stay signed in.
-            cookie_name: __Host-SESSID
+            #
+            # Bugfix (discovered verifying Task 29's messenger config under
+            # --env=prod): the key is `name`, not `cookie_name` -- Task 2's
+            # own notes list `name` as the valid key
+            # (Configuration.php:769-800); `cookie_name` is not a recognized
+            # `framework.session` option at all, so `when@prod` never actually
+            # compiled a container for `--env=prod` from the moment Task 13
+            # added this line. Nothing caught it because every prior task's
+            # verify commands ran under `-e APP_ENV=test`/`dev`, never `prod`.
+            name: __Host-SESSID
 
 when@test:
     framework:

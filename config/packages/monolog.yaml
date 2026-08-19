@@ -1,6 +1,11 @@
 monolog:
     channels:
         - deprecation # Deprecations are logged in the dedicated "deprecation" channel when it exists
+        # Messenger's own WorkerMessageFailedEvent/retry logging (Task 29,
+        # AC-9/AC-13's "operator-visible" half) lands here instead of the
+        # default channel, so a dead SMTP host's retries are findable without
+        # being buried in general app noise.
+        - messenger
 
 when@dev:
     monolog:

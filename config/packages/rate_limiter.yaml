@@ -1,0 +1,35 @@
+framework:
+    rate_limiter:
+        # G-22's numbers, not Symfony's defaults -- see
+        # specs/auth-foundation-architecture.md's "Rate limiting and CSRF"
+        # section. Consumed by App\Security\LoginRateLimiter (AC-19).
+        login_account:
+            policy: sliding_window
+            limit: 5
+            interval: '15 minutes'
+            cache_pool: cache.rate_limiter
+
+        # Independent of any one account, so a burst against many different
+        # emails from one source still trips (AC-19's enumeration-resistance
+        # half; see architecture note on keying the *submitted* identifier).
+        login_source:
+            policy: sliding_window
+            limit: 20
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter
+
+        # One pair of limiters, reused by both PasswordResetService (Task 30)
+        # and EmailVerificationService's resend (Task 26/27) -- identical
+        # G-22 numbers, so the architecture deliberately declares this pair
+        # once rather than four near-duplicate limiters (AC-20).
+        password_reset_account:
+            policy: sliding_window
+            limit: 3
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter
+
+        password_reset_source:
+            policy: sliding_window
+            limit: 10
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter

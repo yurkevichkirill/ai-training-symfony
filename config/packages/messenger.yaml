@@ -1,22 +1,61 @@
 framework:
     messenger:
-        # Uncomment this (and the failed transport below) to send failed messages to this transport for later handling.
-        # failure_transport: failed
+        # Task 2's note: `%env(MESSENGER_TRANSPORT_DSN)%` already carries
+        # `auto_setup=0` in `.env` (the Flex default), so the
+        # `messenger_messages` table must come from a migration -- see the
+        # `messenger_messages` migration this task adds. `failed` reuses the
+        # same `default` DBAL connection/table with a distinct `queue_name`
+        # rather than a second physical table (the standard pattern; DBAL
+        # models no schema for it beyond the one `messenger_messages` table).
+        failure_transport: failed
 
         transports:
             # https://symfony.com/doc/current/messenger.html#transport-configuration
-            # async: '%env(MESSENGER_TRANSPORT_DSN)%'
-            # failed: 'doctrine://default?queue_name=failed'
+            async:
+                dsn: '%env(MESSENGER_TRANSPORT_DSN)%'
+                retry_strategy:
+                    max_retries: 3
+                    delay: 5000
+                    multiplier: 3
+            failed: 'doctrine://default?queue_name=failed'
             sync: 'sync://'
 
         routing:
-            # Route your messages to the transports
-            # 'App\Message\YourMessage': async
+            # Deliberately NOT set here (nor under when@test below).
+            #
+            # `App\Message\SendEmailMessage` is routed to `async` only under
+            # `when@dev:`/`when@prod:`. Once a message class has ANY routing
+            # entry, Messenger's SendMessageMiddleware sends it to that
+            # transport and does NOT also invoke local handlers in the same
+            # process (that is the whole point of routing -- a transport
+            # substitutes for local handling, it does not add to it). Task
+            # 28's `tests/Support/RecordingEmailMessageHandler` needs the
+            # opposite: `EmailVerificationService::resend()`'s dispatch
+            # handled synchronously, in-process, with no transport in
+            # between, so its test can call `->last()` immediately after
+            # `resend()` returns with no worker involved. Giving
+            # `SendEmailMessage` a routing entry in test (or at this
+            # unconditional base level, which test would inherit) would
+            # silently break every already-green Task 28 assertion. So: no
+            # routing entry at all here or in test -> the message stays on
+            # the default bus and is handled locally by whatever handler is
+            # tagged in that environment (`RecordingEmailMessageHandler`,
+            # test-only, see config/services.yaml); a routing entry under
+            # when@dev/when@prod only -> those environments' real
+            # `App\MessageHandler\SendEmailMessageHandler` (also not tagged
+            # in test -- see the same services.yaml note) receives it via the
+            # `async` transport instead. Confirmed empirically with
+            # `debug:messenger` in all three environments -- see Task 29's
+            # plan note.
 
-# when@test:
-#    framework:
-#        messenger:
-#            transports:
-#                # replace with your transport name here (e.g., my_transport: 'in-memory://')
-#                # For more Messenger testing tools, see https://github.com/zenstruck/messenger-test
-#                async: 'in-memory://'
+when@dev:
+    framework:
+        messenger:
+            routing:
+                'App\Message\SendEmailMessage': async
+
+when@prod:
+    framework:
+        messenger:
+            routing:
+                'App\Message\SendEmailMessage': async

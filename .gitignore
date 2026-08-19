@@ -9,6 +9,7 @@
 /vendor/
 ###< symfony/framework-bundle ###
 .idea/
+*.local.txt
 
 # BEGIN ACCELERATOR MANAGED ENTRIES
 .worktrees/

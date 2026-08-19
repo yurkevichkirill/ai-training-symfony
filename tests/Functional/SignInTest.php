@@ -36,6 +36,9 @@ final class SignInTest extends WebTestCase
     private KernelBrowser $client;
     private EntityManagerInterface $em;
 
+    /** @var list<string> */
+    private array $persistedEmails = [];
+
     protected function setUp(): void
     {
         $this->client = self::createClient();
@@ -55,6 +58,16 @@ final class SignInTest extends WebTestCase
 
         if ($connection->isTransactionActive()) {
             $connection->rollBack();
+        }
+
+        // AuthEventRecorder (Task 34) writes LOGIN_SUCCEEDED/LOGIN_FAILED
+        // rows through its own, genuinely separate physical connection --
+        // see its class docblock -- so they are not covered by the
+        // rollback above (nor, for the same reason, is the fixture user
+        // persist() below committed instead of leaving it to the rollback).
+        foreach ($this->persistedEmails as $email) {
+            $connection->executeStatement('DELETE FROM auth_event WHERE user_id IN (SELECT id FROM app_user WHERE email = :email)', ['email' => $email]);
+            $connection->executeStatement('DELETE FROM app_user WHERE email = :email', ['email' => $email]);
         }
 
         parent::tearDown();
@@ -222,6 +235,19 @@ final class SignInTest extends WebTestCase
     {
         $this->em->persist($user);
         $this->em->flush();
+        $this->persistedEmails[] = $user->getEmail();
+
+        // Committed immediately, then a fresh transaction reopened for the
+        // rest of this test to keep relying on for rollback-based cleanup
+        // of everything else. AuthEventRecorder's own physical connection
+        // (Task 34) cannot see this row otherwise -- LOGIN_SUCCEEDED and
+        // LOGIN_FAILED both reference the signed-in-against user by FK, and
+        // an uncommitted row is invisible across connections regardless of
+        // how deeply nested the enclosing transaction is (Postgres
+        // transaction isolation, not a Doctrine limitation).
+        $connection = $this->em->getConnection();
+        $connection->commit();
+        $connection->beginTransaction();
 
         return $user;
     }

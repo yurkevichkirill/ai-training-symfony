@@ -43,6 +43,13 @@ security:
                 # shape, so the response cannot be used to enumerate accounts.
                 failure_handler: App\Security\UniformAuthenticationFailureHandler
 
+            # Runs before the password is checked (login_throttling fires
+            # ahead of the authenticator), at G-22's numbers: 5/15min per
+            # account, 20/hour per source IP block. See the class docblock
+            # for why it keys on the submitted identifier (AC-19).
+            login_throttling:
+                limiter: App\Security\LoginRateLimiter
+
             logout:
                 path: app_logout
                 target: app_login

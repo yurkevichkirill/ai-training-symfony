@@ -906,7 +906,7 @@
   `array_unique` over their response signatures rather than each against a
   fixed expectation.
 
-- [ ] 18. **`SessionIdleSubscriber` — deterministic 8-hour inactivity
+- [x] 18. **`SessionIdleSubscriber` — deterministic 8-hour inactivity
   expiry.**
   New file `src/EventSubscriber/SessionIdleSubscriber.php`, subscribing to
   `kernel.request` (only on the main request, only for authenticated
@@ -923,7 +923,55 @@
   (AC-7 — the deterministic half of inactivity expiry, on top of
   `gc_maxlifetime`'s probabilistic backstop from Task 13.)
 
-- [ ] 19. **Logout replay and sign-in session-regeneration test.**
+  **Done 2026-08-19.** `src/EventSubscriber/SessionIdleSubscriber.php` reuses
+  `%app.session_idle_seconds%` from Task 13 (via `#[Autowire]`) rather than
+  redefining it.
+
+  **The one decision the task text left open, resolved from the installed
+  source rather than guessed: listener priority.** `Firewall::onKernelRequest`
+  — which runs `ContextListener` (restores the token from the session) and
+  `AccessListener` (makes the access-control decision) synchronously, back to
+  back, inside one `kernel.request` dispatch — is itself registered at
+  priority 8 (`vendor/symfony/security-http/Firewall.php`). Registering this
+  subscriber at the default priority (i.e. after the firewall) would only
+  catch the *next* request: the access decision for the current one is
+  already made by the time a priority-0 listener runs, using the token that
+  was still valid when the firewall read it. So the subscriber is registered
+  at priority 32 — *above* the firewall — and invalidates the session before
+  `ContextListener` ever reads a token out of it, satisfying the task's "not
+  letting *the* request proceed as authenticated" (not just the next one).
+  One consequence: at that priority `security.token_storage` is not populated
+  yet for this request, so "authenticated session" is read directly off the
+  session bag's `_security_main` key (the key `ContextListener` writes;
+  `contextKey` defaults to the firewall name, and `security.yaml` sets no
+  `context:` for `main`) rather than off `TokenStorageInterface`. Both facts
+  are recorded in the class docblock so a future reader does not "simplify"
+  the priority back to the default and silently reopen the one-more-request
+  gap.
+
+  `tests/Functional/SessionIdleExpiryTest.php` follows Task 17's conventions
+  (`UserFactory`, `disableReboot()`, a transaction rolled back in `tearDown`).
+  Beyond the task's single scenario it adds two controls that a real
+  regression could otherwise slip past: a session comfortably inside the
+  threshold must stay authenticated (else "always invalidate" would pass the
+  main assertion for the wrong reason), and two requests each individually
+  inside the window, spaced further apart than the window itself, must still
+  authenticate — proving `_last_activity` rolls forward on activity rather
+  than being checked only against the timestamp stamped at sign-in. Session
+  aging is done by writing `_last_activity` directly into the `Session`
+  instance the prior request used (`$client->getRequest()->getSession()`) and
+  calling `save()` — `when@test`'s `session.storage.factory.mock_file` is
+  file-backed, so this is visible to the next request exactly as real elapsed
+  time would be, per the task's instruction not to `sleep()`.
+
+  Verify: **3 tests, 18 assertions, green**
+  (`docker compose exec -T -e APP_ENV=test php php bin/phpunit
+  tests/Functional/SessionIdleExpiryTest.php` — the host PHP still lacks
+  `pdo_pgsql`, per Task 1's environment note). The broader suite
+  (`tests/Functional/`, 33 tests; the full suite, 83 tests) stayed green, so
+  Tasks 1-17/20 show no regression.
+
+- [x] 19. **Logout replay and sign-in session-regeneration test.**
   New file `tests/Functional/LogoutAndSessionRegenerationTest.php`: (a)
   sign in, capture the session cookie, POST to `/logout` with a valid CSRF
   token, then replay the pre-logout session cookie on a protected route —
@@ -933,6 +981,40 @@
   behavior, this task is the proof, not new production code).
   Verify: `php bin/phpunit tests/Functional/LogoutAndSessionRegenerationTest.php`.
   (AC-6, AC-8.)
+
+  **Done 2026-08-19.** No production code needed — confirmed both mechanisms
+  are already live: Task 12's `logout: { invalidate_session: true }` and
+  `form_login`'s own session migration. The CSRF token submitted for
+  `/logout` is the real value rendered on Task 20's dashboard template, not
+  hand-built, so the test also exercises the logout route's own CSRF gate
+  rather than assuming it out of the way.
+
+  **One thing the task assumed that does not hold in this app, resolved by
+  measuring rather than guessing: capturing "the session cookie before
+  sign-in" first requires *a* session to exist.** `/login`'s CSRF is
+  stateless (`csrf.yaml`) and its template has no flash messages to read on a
+  first visit, so `GET /login` never starts a PHP session here — confirmed
+  empirically (no `Set-Cookie` header at all on that request). So part (b)
+  manufactures the pre-sign-in session directly: it starts and saves the
+  current (anonymous) request's own `SessionInterface` — the same
+  `mock_file`-backed storage every real request uses — and hands its cookie
+  to the test client's jar exactly as a `Set-Cookie` response header would
+  have. That is the "value observed before authentication"; what the test
+  actually checks is only what `form_login` does to it at sign-in. Part (a)
+  needed no such workaround, since a real sign-in genuinely does leave a
+  session cookie in the jar to capture.
+
+  The session cookie name needed for both halves (`MOCKSESSID`) was confirmed
+  against the compiled test container's `session.storage.factory.mock_file`
+  arguments rather than assumed as `NativeSessionStorage`'s default
+  `PHPSESSID`.
+
+  Verify: **2 tests, 11 assertions, green**, stable across three repeated
+  runs (`docker compose exec -T -e APP_ENV=test php php bin/phpunit
+  tests/Functional/LogoutAndSessionRegenerationTest.php` — the host PHP
+  still lacks `pdo_pgsql`, per Task 1's environment note). The broader suite
+  (`tests/Functional/`, 35 tests; the full suite, 85 tests) stayed green, so
+  Tasks 1-18/20 show no regression.
 
 - [x] 20. **`RoleLandingResolver`, `HomeController`, and the four dashboard
   controllers.**
@@ -981,7 +1063,7 @@
   task: an anonymous request to `/` redirects to `/login`, which is the
   catch-all `access_control` rule seen from the other side.
 
-- [ ] 21. **Router-sweep test for default-deny (AC-18).**
+- [x] 21. **Router-sweep test for default-deny (AC-18).**
   New file `tests/Functional/RouterSweepTest.php`: read every registered
   route from the router (`php bin/console debug:router --format=json` via
   a shelled call, or autowire the `RouterInterface` directly in the test
@@ -996,7 +1078,77 @@
   Verify: `php bin/phpunit tests/Functional/RouterSweepTest.php`.
   (AC-18.)
 
-- [ ] 22. **Rate limiter configuration — login, reset, and verification
+  **Done 2026-08-19.** `tests/Functional/RouterSweepTest.php` autowires
+  `RouterInterface` (via `self::getContainer()`, public because
+  `framework.test: true`) and walks `getRouteCollection()->all()` — no route
+  is hand-listed. The public allow-list and the `dev` firewall's pattern are
+  both parsed straight out of `config/packages/security.yaml` with the
+  `Yaml` component rather than copied into the test, so the test reconciles
+  against whatever Task 12's file actually says and stays correct if a
+  later task edits the allow-list.
+
+  **Judgment calls, each documented in the test itself:**
+  - **Public vs. non-public split.** A route matching one of the parsed
+    `PUBLIC_ACCESS` patterns is not requested at all — the assertion the
+    task specifies is an OR ("matched by the allow-list, **or** answers
+    302/403"), and a public route is allowed to legitimately answer 200.
+    This also sidesteps `/logout` cleanly: it is POST-only and CSRF-gated,
+    but it is also on the public allow-list (`^/(login|logout)$`), so it is
+    skipped rather than requiring a hand-built CSRF token for a route this
+    test has no need to actually call.
+  - **Parameterized routes.** None exist yet in this app (Tasks 26-31 add
+    `{token}` routes later) — the second bullet from the task text is
+    still built in now, not deferred: `concretePath()` substitutes each
+    `{param}` with the first of two generic candidates
+    (`'placeholder-value'`, then `'1'`) that satisfies the route's own
+    `requirement` regex, so a future numeric-only parameter still resolves
+    to something that matches its route, without hand-listing routes by
+    name.
+  - **Non-GET methods.** `anonymousRequestMethod()` uses the route's own
+    declared methods (GET when allowed, otherwise the first declared
+    method) rather than assuming GET universally — moot for every
+    *non-public* route today (all five are GET-only), but in place for a
+    future POST-only non-public route.
+  - **Framework-internal exclusion.** Route name prefix `_` (covers
+    `_profiler`, `_wdt`, `_preview_error`, ...) plus a belt-and-braces path
+    check against the `dev` firewall's own pattern, read from the same
+    config file. This project has no `web_profiler` recipe installed, so
+    neither exclusion fires today; both stay in place per the task's
+    explicit instruction and so a future profiler install does not turn
+    this test into a tooling-route checker.
+  - Two non-emptiness assertions guard against the sweep silently checking
+    nothing on either side of the split (a config-parsing regression could
+    make every route look "public" or make the allow-list parse empty).
+
+  **Verified the test is not passing vacuously**, per this task's own
+  instruction to investigate before trusting a green run: temporarily
+  removed the `^/, roles: ROLE_USER` catch-all from `security.yaml` — the
+  test *stayed* green, because every dashboard controller and
+  `HomeController` also carries its own `#[IsGranted]` attribute (the
+  architecture's documented "belt and braces" — `access_control` is a path
+  net, the attribute states the requirement where the code is), so
+  `AccessDeniedException` still fires and the anonymous request still gets
+  302. Removing *both* layers together (the catch-all **and**
+  `HomeController`'s `#[IsGranted('ROLE_USER')]`) did turn `/` into a
+  genuine gap, and the test correctly failed — the anonymous request hit
+  `$this->getUser()` on a null user and 500'd, which the test reports
+  distinctly from a 200 ("got 500" in the failure message). Both files were
+  restored immediately after; `git diff` on `security.yaml` and
+  `HomeController.php` is empty.
+
+  Verify: **1 test, 7 assertions, green**
+  (`docker compose exec -T -e APP_ENV=test php php bin/phpunit
+  tests/Functional/RouterSweepTest.php` — the host PHP still lacks
+  `pdo_pgsql`, per Task 1's environment note). Of the seven routes
+  currently registered (`app_home`, `app_login`, `app_logout`,
+  `admin_dashboard`, `trainer_dashboard`, `coach_dashboard`,
+  `player_dashboard`), two are public (`app_login`, `app_logout`) and five
+  are checked against 302/403 (all five currently answer 302, the
+  unauthenticated-session-redirect shape). The broader suite
+  (`tests/Functional/`, 36 tests; the full suite, 86 tests) stayed green,
+  so Tasks 1-20 show no regression.
+
+- [x] 22. **Rate limiter configuration — login, reset, and verification
   limiters.**
   New file `config/packages/rate_limiter.yaml` (keys confirmed by Task 2)
   declaring four limiters: `login_account` (`sliding_window`, 5 per 15
@@ -1025,7 +1177,82 @@
   (AC-19 — login limiter; groundwork for AC-20 — reset/verification
   limiters declared here, consumed in Tasks 27 and 30.)
 
-- [ ] 23. **Login throttle behavior test.**
+  **Done 2026-08-19.** `config/packages/rate_limiter.yaml` declares the four
+  limiters at G-22's numbers exactly as specified (`login_account` 5/15min,
+  `login_source` 20/hour, `password_reset_account` 3/hour,
+  `password_reset_source` 10/hour — one shared pair for reset and
+  verification-resend, not four), each with an explicit `cache_pool:
+  cache.rate_limiter` (redundant with the framework's own default of the
+  same id, kept explicit per the task's "keys confirmed by Task 2").
+  `config/packages/cache.yaml` adds that pool as a dedicated filesystem
+  adapter (not an inherited `cache.app` parent), per the architecture's
+  accepted single-node risk — no Redis. `src/Security/IpTruncator.php` is
+  the pure truncation helper (`inet_pton`/`inet_ntop`, keep the leading 3
+  bytes of 4 for IPv4 (/24), the leading 8 of 16 for IPv6 (/64), zero the
+  rest — both prefixes land on a byte boundary so no partial-byte masking is
+  needed), with its own `tests/Security/IpTruncationTest.php` (22 assertions:
+  concrete address/result vectors for both families, same-block/
+  different-block pairs, and an unparsable-input fallback).
+  `src/Security/LoginRateLimiter.php` extends `AbstractRequestRateLimiter`,
+  composing `limiter.login_account` (keyed on
+  `hash('sha256', $normalizedEmail . $appSecret)`, using the existing
+  `User::normalizeEmail()` rather than re-deriving normalization) and
+  `limiter.login_source` (keyed on `IpTruncator::truncate($request-
+  >getClientIp())`, used as-is and *not* separately hashed, since
+  `RateLimiterFactory`/`CacheStorage` sha1-hashes every limiter id before it
+  reaches the cache pool — confirmed by reading
+  `vendor/symfony/rate-limiter/Storage/CacheStorage.php`). Both factories are
+  bound explicitly in `config/services.yaml` (`$loginAccountLimiter: '@limiter.
+  login_account'`, `$loginSourceLimiter: '@limiter.login_source'`,
+  `$appSecret: '%kernel.secret%'`), since autowiring by type cannot
+  distinguish two `RateLimiterFactory` arguments. `security.yaml` gains the
+  `login_throttling.limiter: App\Security\LoginRateLimiter` line Task 12 left
+  for this task. Confirmed the identifier this limiter keys on
+  (`SecurityRequestAttributes::LAST_USERNAME`) is set by Symfony's own
+  `LoginThrottlingListener` from the passport's `UserBadge` *before* this
+  limiter's `getLimiters()` runs and before the password is checked — read
+  `vendor/symfony/security-http/EventListener/LoginThrottlingListener.php`
+  directly rather than assuming, so the "runs before authentication" claim in
+  the architecture is verified, not just repeated.
+
+  **Verify, exactly as specified:** `lint:yaml` on the new file — OK;
+  `lint:container` — OK, in both the `dev` and `test` environments;
+  `phpunit tests/Security/IpTruncationTest.php` — OK, 13 tests, 13
+  assertions.
+
+  **Regression found and fixed — not a new file, a `when@test` addition to
+  `cache.yaml`.** Running the full suite twice back-to-back (as this task's
+  own instructions require) exposed a real interaction: `SignInTest`'s
+  timing-comparison case (Task 17) submits 30 failed logins per failure
+  cause — 120 in one method alone — all from the same simulated client IP.
+  That alone blows past `login_source`'s real 20/hour budget, and because
+  the default `cache.rate_limiter` pool is a *filesystem* adapter, the
+  exhausted counter persisted on disk **across separate `phpunit` process
+  invocations**, not just within one run. First clean run: 99/99 green
+  (`testEveryRoleSignsInThroughTheSameRoute`'s 4 successful logins happen
+  first in file order, before the timing test spends the source budget).
+  Second run immediately after: 25 failures, every one a correct-password
+  sign-in bounced back to `/login` — the *leftover* state from run one, not
+  anything wrong with run two's code. This is exactly the "single-node,
+  per-node" risk the architecture's Risks section already names, just
+  surfacing as cross-*run* leakage in dev/CI rather than cross-*node*
+  leakage in production. Fix: `cache.yaml` gets a `when@test` block pointing
+  `cache.rate_limiter` at `cache.adapter.array` instead of the filesystem
+  adapter — in-memory, scoped to the container's lifetime, so every fresh
+  test process starts with an empty limiter regardless of what a previous
+  run did, while `dev`/`prod` keep the filesystem adapter unchanged (checked
+  with `debug:config framework cache` in both environments). This does not
+  touch AC-19's production guarantee and does not pre-empt Task 23 — it only
+  stops one test file's already-existing attempt volume from wedging every
+  other test for up to an hour. Re-verified clean: two full-suite runs back
+  to back (99/99, 99/99), `tests/Functional/` alone (36/36),
+  `tests/Functional/SignInTest.php` alone (10/10) — all immediately
+  following each other, no gap.
+  (AC-19 — login limiter now live on the real firewall, not just declared;
+  groundwork for AC-20 — the shared reset/verification pair is declared and
+  will be consumed by Tasks 27 and 30, not implemented here.)
+
+- [x] 23. **Login throttle behavior test.**
   New file `tests/Functional/LoginThrottleTest.php`: 5 failed attempts
   against a real `UserFactory` account within the window locks the 6th
   attempt even with the **correct** password (proves the limiter runs
@@ -1038,7 +1265,77 @@
   Verify: `php bin/phpunit tests/Functional/LoginThrottleTest.php`.
   (AC-19.)
 
-- [ ] 24. **`UserAccountService` — creation, normalization, unique-violation
+  **Done 2026-08-19.** `tests/Functional/LoginThrottleTest.php`, 4 tests: a
+  foundation test proving one real failed HTTP login consumes exactly one
+  `login_account` token through the actual firewall pipeline
+  (`testASingleFailedHttpLoginAttemptConsumesExactlyOneAccountToken`); the
+  5-locks-6th test named by this task
+  (`testFiveFailedAttemptsLockTheSixthEvenWithTheCorrectPassword`); the
+  unknown-email-same-rate test
+  (`testTheSameThrottleAppliesToAnUnknownEmailAtTheSameRate`); and the
+  source-independence test
+  (`testABurstAcrossManyEmailsFromOneSourceTripsTheSourceLimiterIndependently`).
+
+  **Regression found — a second, distinct one from Task 22's, in the same
+  `when@test` array-cache fix.** Writing this test (the first one to actually
+  assert rate-limiter *counts* across several requests) surfaced that
+  `cache.rate_limiter`'s test-only `cache.adapter.array` pool does not
+  survive past a single request within one test method, even with
+  `KernelBrowser::disableReboot()`. Root cause, confirmed by reading
+  `vendor/symfony/http-kernel/Kernel.php` rather than assumed:
+  `ArrayAdapter::reset()` calls `clear()` (wipes everything), every
+  `cache.pool`-tagged service — `cache.rate_limiter` included, in both
+  filesystem (dev/prod) and array (test) form — is auto-tagged
+  `kernel.reset` by `Symfony\Component\Cache\DependencyInjection\
+  CachePoolPass`, and `Kernel::boot()` runs every `kernel.reset` service's
+  reset method at the start of the *second and every later* top-level
+  request handled by an already-booted kernel (`!$requestStackSize &&
+  $resetServices`, the latter set at the end of the previous request).
+  `disableReboot()` only skips the browser's own explicit
+  reboot-between-requests; it has no effect on this kernel-internal
+  mechanism. In dev/prod this is invisible — `FilesystemAdapter::reset()`
+  only flushes deferred writes, it does not clear the pool — so the
+  regression is test-only and does not touch AC-19's production guarantee,
+  exactly like Task 22's. Fix, entirely inside the test file, no config or
+  production code touched: every "attempt" before the one that decides a
+  test calls `LoginRateLimiter::consume()` directly (still the real
+  key-hashing and sliding-window logic, just in-process, so it never
+  triggers `Kernel::handle()` and therefore never triggers the reset), and
+  each test's one real HTTP request is a bare `POST` with no preceding GET
+  (stateless CSRF's `SameOriginCsrfTokenManager::isValidOrigin()` accepts a
+  same-origin `Referer` header on its own; the `_csrf_token` value it
+  expects with no cookie present is the literal cookie name, `'csrf-token'`,
+  confirmed against `security/login.html.twig` and
+  `isValidDoubleSubmit()`) — keeping that request the *first*
+  `$client->request()` call in the method, so nothing resets before it runs.
+  The foundation test proves this substitution is equivalent to a real
+  failed HTTP attempt for the one thing that matters (how much
+  `login_account` is decremented).
+
+  **Test-isolation judgment calls.** Each method sets its own `REMOTE_ADDR`
+  via `setServerParameter()` before touching the limiter, even though each
+  test method already gets a fully fresh kernel/container (confirmed by
+  reading `KernelTestCase::tearDown()`, which calls `ensureKernelShutdown()`
+  unconditionally) and therefore a fresh, empty array pool regardless of
+  IP — distinct IPs are belt-and-suspenders documentation, not load-bearing,
+  except inside the burst test, where one shared IP across many emails is
+  the entire point. The burst test's final "control" request (clean IP,
+  correct password, expects success) happens to run against a *fully*
+  reset pool by the time it executes (it is that test's second real HTTP
+  request), not just an unburdened IP — the assertion is still a valid
+  control for "the target account and password are fine, the earlier
+  refusal was login_source's doing," documented as such rather than
+  claimed to be IP-scoped isolation it does not actually rely on.
+
+  **Verify, exactly as specified:** `php bin/phpunit
+  tests/Functional/LoginThrottleTest.php` — OK, 4 tests, 22 assertions.
+  `lint:container` — OK in both `dev` and `test`. Full suite twice
+  back-to-back — 103/103, 103/103 (up from Task 22's 99, the 4 new tests).
+  `tests/Functional/` alone and `LoginThrottleTest.php` alone, immediately
+  after the two full runs — 40/40, 4/4. No leakage observed in any
+  combination.
+
+- [x] 24. **`UserAccountService` — creation, normalization, unique-violation
   mapping.**
   New file `src/Service/UserAccountService.php`: `create(string $email,
   string $plainPassword, UserRole $role): User` — normalizes email, hashes
@@ -1062,7 +1359,73 @@
   (AC-5 — the concurrent-registration edge case, "exactly one succeeds ...
   not a 500".)
 
-- [ ] 25. **Password policy: `NotBlocklistedPassword` constraint + offline
+  **Done 2026-08-19.** `src/Service/UserAccountService.php` (email
+  normalization stays entirely inside `User`'s own constructor — this
+  service never duplicates it), `src/Service/Exception/EmailAlreadyInUseException.php`,
+  and `tests/Service/UserAccountServiceConcurrentCreationTest.php`.
+
+  **How the closed-EntityManager pitfall was actually solved (not just
+  commented around):** confirmed against the installed `doctrine/orm 3.6.8`
+  / `doctrine/dbal 4.4.4` sources (not memory) that both `UnitOfWork::commit()`
+  and `EntityManager::wrapInTransaction()` independently wrap their work in
+  `try { ... } finally { if (!$successful) { $this->em->close(); ... } }` —
+  so any exception escaping the wrapped callback, including
+  `UniqueConstraintViolationException` thrown from `executeInserts()` against
+  `app_user`'s non-deferrable `UNIQUE (email)` index, leaves that
+  `EntityManager` instance permanently closed, and every later
+  `persist()`/`flush()`/`wrapInTransaction()` call on it throws
+  `EntityManager is closed` — including for a *later, unrelated* `create()`
+  call, since the container hands back the same closed singleton by default.
+  The service therefore injects `Doctrine\Persistence\ManagerRegistry`
+  instead of `EntityManagerInterface` directly. A private
+  `openEntityManager()` asks the registry for the manager, and if
+  `!$manager->isOpen()` (true exactly when a prior `create()` call's
+  violation closed it) calls `ManagerRegistry::resetManager()` — Doctrine's
+  own documented mechanism for this ("force the creation of a new manager if
+  the current one is closed", per `AbstractManagerRegistry::resetManager()`),
+  which resets the container's cached service so the *next* fetch builds a
+  fresh, open `EntityManager` around the same underlying DBAL connection. The
+  catch block that rethrows `EmailAlreadyInUseException` carries the explicit
+  comment instructing the next editor never to touch `$entityManager` again
+  there, and the recovery path lives entirely in `openEntityManager()`
+  instead. `UserAccountServiceConcurrentCreationTest` proves this end to end,
+  not just documents it: it creates a user, then a second `create()` call
+  with the same email typed in a different case (`'  ANN@EXAMPLE.TEST  '`)
+  hits the real Postgres unique-index collision and is asserted to raise
+  `EmailAlreadyInUseException` (never an uncaught error), and then a *third*
+  `create()` call for a completely different email is asserted to succeed on
+  the same `$service` instance — which would fail with `EntityManager is
+  closed` if the reset mechanism did not actually work.
+
+  Two judgement calls worth recording:
+  - **The password hash is set via `User::setPasswordHash()` after
+    constructing with a placeholder, not passed into the constructor
+    pre-hashed.** `hashPassword()` needs a `PasswordAuthenticatedUserInterface`
+    instance to call, and constructing one, hashing against it, then
+    discarding it for a second "real" constructor call would be pure waste
+    since the project's single hasher is bound to the interface, not to
+    `User`'s concrete class. This does set `password_changed_at` at creation
+    time (via `setPasswordHash()`'s own contract) — treated here as correct,
+    not a side effect to work around: it records when *this* password was
+    set, distinct from `UserRepository::upgradePassword()`'s deliberate
+    preservation of the old timestamp, which is specifically for a
+    transparent rehash of the *same* plaintext, not a new password.
+  - **The test could not fetch `UserAccountService` via
+    `self::getContainer()->get(UserAccountService::class)`:** nothing in the
+    app wires it in yet (no controller/command consumes it until a later
+    task), so as a genuinely unreferenced private service it is compiled out
+    of the container entirely — confirmed with `bin/console debug:container`,
+    which showed its only usage as the weak test-locator reference that
+    `RemoveUnusedDefinitionsPass` does not honor. The test instead builds it
+    directly from `doctrine` and `security.user_password_hasher`, both
+    real, independently-consumed services that survive compilation.
+
+  Verify: `php -l` clean on all three files; `docker compose exec -T
+  -e APP_ENV=test php php bin/phpunit tests/Service/UserAccountServiceConcurrentCreationTest.php`
+  — **2 tests, 9 assertions, green**. Full suite re-run afterward:
+  **105 tests, 261 assertions, green** — no regressions from Tasks 1-23.
+
+- [x] 25. **Password policy: `NotBlocklistedPassword` constraint + offline
   list.**
   New file `src/Validator/Constraints/NotBlocklistedPassword.php` (the
   constraint) and `NotBlocklistedPasswordValidator.php` (the validator,
@@ -1090,7 +1453,63 @@
   no-composition-rules / blocklist policy itself has no dedicated AC number
   but is the mechanism AC-4's safe-storage guarantee depends on.)
 
-- [ ] 26. **`EmailVerificationTokenService` and `EmailVerificationService`.**
+  Done 2026-08-19: built exactly the standalone mechanism this task scopes
+  and nothing from Tasks 31/36 — no `ChangePasswordFormType`, no DTO, no
+  `UserAccountService` wiring. New files: `src/Validator/Constraints/
+  NotBlocklistedPassword.php` (constraint, message + error code), `src/
+  Validator/Constraints/NotBlocklistedPasswordValidator.php` (validator;
+  `#[Autowire('%kernel.project_dir%/src/Resources/security/common-
+  passwords.txt')]` on the constructor's `$blocklistPath` string param, since
+  autowiring can't resolve a scalar by type — confirmed live via
+  `bin/console debug:container --tag=validator.constraint_validator` and
+  `lint:container`, both green; matching is case-insensitive, matched
+  against a lazily-loaded, request-cached `array<string,true>` set),
+  `src/Resources/security/common-passwords.txt` (no existing non-Twig
+  static-asset convention in this project, so placed under `src/Resources/`
+  per the task's own fallback instruction), and `tests/Validator/
+  PasswordPolicyTest.php`.
+
+  **Blocklist scope decision:** the list is a curated ~3,300-entry set
+  (common passwords, name/date/keyboard-walk patterns with common suffixes)
+  generated from a hand-written word list, not a literal top-100k breach-
+  corpus download — this environment has no network access to fetch one.
+  This is documented as a pragmatic stand-in in the validator's own
+  docblock: it is sufficient to prove and test the mechanism end to end, and
+  a production deployment can drop in a larger vetted list (e.g. the real
+  top-100k) by replacing the file's contents only, no code change. The
+  test's blocklisted fixture, `password123456`, was confirmed present in
+  the generated file (`grep`) before being used, per the task's instruction
+  not to assume.
+
+  **Test approach:** per the task's guidance that the consuming form/DTO
+  doesn't exist yet, `PasswordPolicyTest` builds a validator directly via
+  `Validation::createValidatorBuilder()` with a custom
+  `ConstraintValidatorFactory`, rather than booting the kernel. The HIBP-
+  outage simulation constructs a real `NotCompromisedPasswordValidator`
+  with its `$enabled` constructor argument set to `false` — the identical
+  mechanism this project's `config/packages/validator.yaml`
+  (`when@test: not_compromised_password: false`) already uses to disable
+  the live HTTP call in the test environment — which is a stub that fails
+  open exactly as an HIBP outage would. One judgement call on the multi-byte
+  test: the literal instruction ("a 12-character password with a non-ASCII
+  character passes") wouldn't by itself distinguish byte-counting from
+  codepoint-counting, since a 12-plus-codepoint value passes under either
+  mode. The fixture used instead has 11 codepoints but 13 bytes (ends in one
+  3-byte UTF-8 character), so it fails under `Length::COUNT_CODEPOINTS` and
+  passes under `Length::COUNT_BYTES` — both modes are asserted directly on
+  the same value, so the byte-vs-character distinction is actually
+  exercised, not just plausible. The over-limit test also asserts the
+  violation's `{{ value_length }}` parameter equals the full untruncated
+  byte count (4097), not a clipped 4096, to prove non-truncation.
+
+  Verify: `docker compose exec -T -e APP_ENV=test php php bin/phpunit
+  tests/Validator/PasswordPolicyTest.php` — **6 tests, 19 assertions,
+  green**. `bin/console lint:container` — green. Full suite re-run
+  afterward: **111 tests, 280 assertions, green** — no regressions from
+  Tasks 1–24 (105 tests/261 assertions before this task's 6 tests/19
+  assertions).
+
+- [x] 26. **`EmailVerificationTokenService` and `EmailVerificationService`.**
   New file `src/Service/EmailVerificationTokenService.php`: `issue(User
   $user): string` — `random_bytes(9)` base64url-encoded selector (24
   chars), `random_bytes(32)` verifier, store `hash('sha256', $verifier)`
@@ -1119,7 +1538,116 @@
   Verify: `php -l` on both files (functional coverage is Task 28).
   (AC-13, AC-14 — the mechanism itself.)
 
-- [ ] 27. **`EmailVerificationController`, `ResendVerificationFormType`,
+  **Done 2026-08-19.** New files: `src/Service/EmailVerificationTokenService.php`
+  (`issue()`/`consume()`), `src/Service/EmailVerificationService.php`
+  (`resend()`/`consume()`), three typed exceptions in `src/Service/Exception/`
+  (`InvalidVerificationTokenException`, `VerificationTokenAlreadyConsumedException`,
+  `VerificationTokenExpiredException` — the latter two carry the token's
+  `User`, matching this task's other convention-source, `UserAccountService`'s
+  `EmailAlreadyInUseException`), and `src/Message/SendEmailMessage.php`.
+  `src/Repository/EmailVerificationTokenRepository.php` gained
+  `findOneBySelectorForUpdate()` (the pessimistic-lock query) and
+  `deleteAllForUser()` (bulk DQL delete, mirroring
+  `ResetPasswordRequestRepositoryTrait::removeRequests()`'s shape from Task 7).
+  `config/services.yaml` gained an explicit argument binding for
+  `EmailVerificationService`'s two `RateLimiterFactory` arguments
+  (`limiter.password_reset_account` / `limiter.password_reset_source`), the
+  same "autowiring can't distinguish two same-typed args" fix Task 22 already
+  applied to `LoginRateLimiter`.
+
+  **Selector length discrepancy, resolved per this task's own instruction to
+  check the entity rather than assume.** Both the plan and the architecture
+  doc say "`random_bytes(9)` base64url-encoded selector (24 chars)" — but
+  9 bytes is a multiple of 3, so base64 never pads it: the actual encoded
+  length is always exactly 12 characters, not 24. `EmailVerificationToken`'s
+  column is `varchar(24)` (Task 6) — generous headroom, not a required exact
+  width. Implemented as documented in the code: `random_bytes(9)` ->
+  12-char base64url selector, `SELECTOR_LENGTH = 12` is the single constant
+  `issue()` and `consume()` both key off, and it fits the column with room to
+  spare. No entity or migration change needed.
+
+  **Pessimistic lock API, confirmed against installed `doctrine/orm ^3.6`
+  source (`vendor/doctrine/orm/src/Query.php::setLockMode()`,
+  `vendor/doctrine/orm/src/EntityManager.php::checkLockRequirements()`):**
+  `Query::setLockMode(\Doctrine\DBAL\LockMode::PESSIMISTIC_WRITE)` throws
+  `Doctrine\ORM\TransactionRequiredException` unless the connection already
+  has an active transaction — so `findOneBySelectorForUpdate()` must only be
+  called from inside `EntityManagerInterface::wrapInTransaction()` (or an
+  equivalent explicit transaction), never standalone. `consume()` does the
+  whole read-lock-check-write sequence inside one `wrapInTransaction()` call,
+  which is also what makes the row lock actually serialize two concurrent
+  consume attempts (Task 28 will assert this directly).
+
+  **Closed-EntityManager pitfall, same one Task 24 documented.**
+  `wrapInTransaction()` closes its EntityManager on *any* exception escaping
+  the callback, including the plain domain exceptions `consume()` throws for
+  every expected rejection (invalid/expired/already-consumed). Copied Task
+  24's `UserAccountService::openEntityManager()` recovery pattern verbatim
+  into `EmailVerificationTokenService` (detect a closed manager, ask
+  `ManagerRegistry::resetManager()` for a fresh one) so a rejected
+  `consume()` call never leaves a later call on the same request broken.
+
+  **Rate limiter exhaustion handled by inspecting the result, not catching an
+  exception.** Confirmed via `vendor/symfony/rate-limiter/RateLimit.php` /
+  `LimiterInterface.php`: `LimiterInterface::consume()` never throws on its
+  own — it returns a `RateLimit` whose `isAccepted()` reports the outcome;
+  only the unused `RateLimit::ensureAccepted()` helper would throw
+  `RateLimitExceededException`. `resend()` calls `->consume()` on both the
+  `password_reset_account` and `password_reset_source` limiters and, if
+  either is not accepted, returns silently — no exception, no return-value
+  difference, so a rate-limited caller is indistinguishable from a normal
+  one, exactly as this task's own instruction required.
+
+  **`password_reset_account` keying matches the architecture doc literally,
+  including its asymmetry with `login_account`.** The architecture text
+  keys `login_account` on `hash('sha256', $normalizedEmail . $appSecret)`
+  but `password_reset_account` on "the normalized email" alone, with no
+  extra secret-keyed hash step mentioned. Implemented exactly as specified
+  rather than silently "fixing" what may or may not be a deliberate choice —
+  `RateLimiterFactory`/`CacheStorage` already sha1-hashes every limiter id
+  before it reaches the cache pool (Task 22 confirmed this from
+  `vendor/symfony/rate-limiter/Storage/CacheStorage.php`), which is enough to
+  make the raw email a safe *cache key*, even though it is not the additional
+  reversibility-resistance property the login limiter's extra hash buys.
+  Flagged here for a future security-reviewer pass, not changed unilaterally.
+
+  **Source-limiter keying reuses `App\Security\IpTruncator` as-is.**
+  `EmailVerificationService::resend(string $emailInput): void` takes no
+  `Request`, unlike `LoginRateLimiter` (an `AbstractRequestRateLimiter`), so
+  the client IP is read via an injected `RequestStack` instead.
+
+  **`SendEmailMessage` shape chosen now, minimal, per this task's explicit
+  scope boundary against Task 29.** `src/Message/SendEmailMessage.php` is a
+  plain, fully serializable DTO: `to` (string), `template` (string
+  identifier — `SendEmailMessage::TEMPLATE_VERIFY_EMAIL = 'verify_email'` is
+  the one constant this task needs), and `context` (flat
+  `array<string, scalar>`, holding the raw `selector.verifier` token string
+  under `'token'` for `resend()`'s dispatch). Deliberately not a
+  `Symfony\Component\Mime\Email`/`TemplatedEmail` object, which is not
+  reliably serializable across a Messenger transport. `resend()` dispatches
+  it via the autowired `MessageBusInterface`. **Nothing consumes this
+  message yet** — no `#[AsMessageHandler]` handler, no `async` transport
+  routing in `config/packages/messenger.yaml` (still the Flex default, only a
+  `sync` transport), no `templates/emails/*.twig` template. Task 29 owns all
+  three; until then, dispatching this message goes to the default `sync` bus
+  with no registered handler and would fail at dispatch time with
+  `NoHandlerForMessageException` if actually invoked with a real user — out
+  of this task's scope (`resend()`'s functional coverage is Task 28, which
+  will need Task 29's transport/handler wired in test config, or a stub, to
+  exercise the dispatch path without erroring).
+
+  **Verify, exactly as specified:** `php -l` on
+  `src/Service/EmailVerificationTokenService.php`,
+  `src/Service/EmailVerificationService.php`, `src/Message/SendEmailMessage.php`,
+  and the three new exception files — clean. `lint:container` — OK in both
+  `dev` and `test` environments; `debug:container` confirms every argument
+  of both new services resolves to the intended service id (including the
+  `limiter.password_reset_account`/`limiter.password_reset_source` binding).
+  `lint:yaml config/services.yaml` — OK. Full suite re-run afterward: **111
+  tests, 280 assertions, green** — unchanged from Task 25 (this task adds no
+  tests of its own; functional coverage is Task 28).
+
+- [x] 27. **`EmailVerificationController`, `ResendVerificationFormType`,
   and templates.**
   New file `src/Controller/EmailVerificationController.php`:
   `#[Route('/verify-email/{token}', name: 'app_verify_email')]` (GET,
@@ -1145,7 +1673,74 @@
   end per the spec's S1 boundary; AC-20 — the resend endpoint is
   rate-limited; AC-22, AC-23 — templates exist for Task 37/38 to finish.)
 
-- [ ] 28. **Verification mechanism test: single-use, expiry, idempotent,
+  **Done 2026-08-19.** New files: `src/Controller/EmailVerificationController.php`
+  (`verify()` on `/verify-email/{token}`, `resend()` on `/verify-email/resend`),
+  `src/Form/ResendVerificationFormType.php` (one `email` field, `NotBlank` +
+  `Email` constraints), `templates/verify_email/resend.html.twig`,
+  `templates/verify_email/result.html.twig`. Both routes were already covered
+  by Task 12's `^/verify-email` `PUBLIC_ACCESS` entry in
+  `config/packages/security.yaml` -- no security.yaml change needed.
+
+  **Route ambiguity, caught before it could bite.** `/verify-email/{token}`
+  has no charset restriction that would exclude the literal path segment
+  "resend" (it is a valid base64url string too), so without disambiguation
+  whichever route Symfony's attribute loader happened to register first would
+  shadow the other for `GET /verify-email/resend`. Fixed two ways: (1)
+  `app_verify_email_resend` declares `priority: 1` (confirmed via
+  `vendor/symfony/routing/Loader/AttributeClassLoader.php` that
+  `#[Route(priority:)]` controls match order independent of declaration
+  order), so it always wins the ambiguous path regardless of method order in
+  the class; (2) `app_verify_email`'s `{token}` requirement is
+  `[A-Za-z0-9_-]{20,}`, which "resend" (6 chars) can never satisfy, as
+  belt-and-braces and as a plain-404 rejection of an obviously-malformed
+  token before it reaches the service. `debug:router` confirms both routes
+  resolve to distinct, correctly-ordered entries.
+
+  **All three typed exceptions mapped to distinct template states, none
+  escape uncaught.** `verify()` catches `InvalidVerificationTokenException`,
+  `VerificationTokenAlreadyConsumedException`, and
+  `VerificationTokenExpiredException` around
+  `EmailVerificationService::consume()` and renders `result.html.twig` with
+  `state` = `invalid` / `already_consumed` / `expired` respectively; the
+  no-exception path (including the service's own idempotent
+  already-verified-success case) renders `state = success`. Confirmed via an
+  ad hoc throwaway functional check (not committed -- Task 28 owns the real
+  coverage) that an invalid-format token renders the `invalid` state at 200,
+  and a too-short token 404s at the router rather than reaching the
+  controller at all.
+
+  **Only two templates, per this task's own list -- no separate
+  `check_email.html.twig` the way the reset-password flow has one.**
+  `resend.html.twig` renders either the form (GET, or an invalid POST
+  re-render) or the "Check your email" confirmation (successful POST),
+  selected by a `submitted` flag the controller passes in, since
+  `EmailVerificationService::resend()` returns `void` and never distinguishes
+  found/not-found/already-verified/rate-limited outcomes to the caller
+  (confirmed by re-reading Task 26's `resend()` body directly rather than
+  assuming). A blank-email submission correctly 422s and re-renders the form
+  with its validation error and CSRF token intact -- Symfony Form's own
+  default status for an invalid submission, not a bug.
+
+  **CSRF:** no custom wiring. `ResendVerificationFormType` is a standard
+  Symfony Form, so `createForm()` automatically uses
+  `config/packages/csrf.yaml`'s project-wide `token_id: submit` (already in
+  `stateless_token_ids`) -- the same mechanism every other form in this
+  project relies on, confirmed present in the rendered form's hidden
+  `_token` field.
+
+  **Verify, exactly as specified:** `docker compose exec -T -e APP_ENV=test
+  php php bin/console lint:twig templates/verify_email` -- "All 2 Twig files
+  contain valid syntax." `debug:router | grep verify_email` --
+  `app_verify_email_resend GET|POST /verify-email/resend` and
+  `app_verify_email GET /verify-email/{token}`, both present, in that
+  disambiguated order. `lint:container` -- OK. Full suite re-run afterward:
+  **111 tests, 280 assertions, green** -- unchanged from Task 26 (this task
+  adds no persistent tests of its own; functional coverage is Task 28),
+  `RouterSweepTest` specifically re-run and green (both new routes are on the
+  public allow-list, so the sweep skips asserting a status on them, exactly
+  as it does for every other public route).
+
+- [x] 28. **Verification mechanism test: single-use, expiry, idempotent,
   concurrent consume.**
   New file `tests/Functional/EmailVerificationFlowTest.php`: resend issues
   a token, consuming it once marks the user verified and returns success;
@@ -1166,7 +1761,135 @@
   explicitly in the phase-3 brief, as its own task, not folded into a
   general test sweep.)
 
-- [ ] 29. **Messenger transport, `SendEmailMessage`, templated emails.**
+  **Done 2026-08-19.** New file `tests/Functional/EmailVerificationFlowTest.php`,
+  7 tests: resend-issues-and-consume success; same-token-twice refused
+  (tested at `EmailVerificationTokenService::consume()`, not the outer
+  `EmailVerificationService::consume()` — see below); 24h+1-minute expiry
+  refused; two idempotent-re-verification cases (same token replayed, and a
+  genuinely fresh second token for an already-verified user); an
+  invalid-token control case; and the concurrent-consume race. Two small
+  support files: `tests/Support/RecordingEmailMessageHandler.php` (a
+  test-only Messenger handler, wired only under a new `when@test:` block in
+  `config/services.yaml`, so `resend()`'s dispatch of `SendEmailMessage` has
+  somewhere to go before Task 29 builds the real handler — otherwise it
+  throws `NoHandlerForMessageException`, exactly as `SendEmailMessage`'s own
+  docblock anticipated this task would need to solve) and
+  `tests/Functional/fixtures/consume-email-verification-token-subprocess.php`
+  (the concurrent test's second racer, see below).
+
+  **Two layers, tested separately, because they legitimately disagree on
+  purpose.** `EmailVerificationTokenService::consume()` throws
+  `VerificationTokenAlreadyConsumedException` on *every* replay of a spent
+  token — that is single-use, enforced server-side. `EmailVerificationService
+  ::consume()` (what a revisited link actually calls) catches that specific
+  exception and treats it as a silent success when the token's own subject
+  is already verified, so a user re-clicking their own link never sees an
+  error. Testing only the outer layer would never prove single-use at all
+  (replay always "succeeds" there); testing only the inner layer would miss
+  the idempotent-UX guarantee. Both are asserted, at the layer that actually
+  owns each property.
+
+  **Investigated, not assumed: does a revisited link need a second valid
+  token, or does consume() accept any fresh one for an already-verified
+  user?** Read `EmailVerificationTokenService::consume()` directly rather
+  than inferring: it checks only the token's own `isConsumed()`/`isExpired()`
+  state, never the user's verification status, before running its happy
+  path. So a second, genuinely fresh, unexpired token for an already-
+  verified user *is* consumed for real and `User::markEmailVerified()` is
+  called again — idempotency here holds only because that method is
+  `$this->emailVerifiedAt ??= $at` (null-coalescing). No bug: the guard that
+  makes this safe is on the entity, not in the service, so
+  `testConsumingAFreshTokenForAnAlreadyVerifiedUserDoesNotMoveTheTimestamp`
+  asserts it directly (timestamp equality across both consumptions) instead
+  of trusting that inference.
+
+  **A real, pre-existing bug found and fixed: email verification was broken
+  for every normal (fresh-request) visit.** Every scenario above passed
+  *within a single test method* on the first attempt, because the token's
+  `User` was always already fully loaded in the same EntityManager before
+  `consume()` touched it. The concurrent-consume subprocess — a genuinely
+  separate PHP process with its own EntityManager that had never loaded that
+  `User` anywhere else, i.e. exactly what a real unauthenticated visit to
+  `/verify-email/{token}` looks like in production — reproducibly hit
+  `LogicException: Attempting to change readonly property App\Entity\User::$id`
+  inside Doctrine's hydrator. Root cause: `User::$id` is a readonly,
+  object-typed (`Uuid`) identifier; the moment `consume()` forces the
+  token's lazily-associated `User` proxy to initialize (via
+  `markEmailVerified()`, or even just constructing one of the typed
+  exceptions with it), Doctrine's hydrator tries to re-set every mapped
+  field on it, including `$id`. Doctrine's readonly-property guard only
+  tolerates a re-set whose new value is `===` the old one; the proxy's
+  pre-populated `$id` and the hydrator's freshly constructed `Uuid` for the
+  same row are two different object instances, so `!==` (identity, not
+  value, comparison) trips every time. Confirmed via a minimal
+  `KernelTestCase` reproduction (`$em->clear()` before `consume()`, no
+  subprocess needed) and confirmed the failure persists even with the
+  association mapped `fetch: EAGER` (moves *where* it fails, not whether).
+  **Fix**, scoped to the one path this task exercises:
+  `EmailVerificationTokenRepository::findUserIdBySelector()` (new — reads
+  the raw `user_id` FK via DQL's `IDENTITY()`, never touching the `user`
+  association) lets `EmailVerificationTokenService::consume()` warm the
+  identity map with a plain, top-level, fully-hydrated `User` *before*
+  running the locked token query — the one hydration path that populates an
+  object-typed readonly identifier in a single pass instead of a
+  stub-then-fill sequence. Documented at length on the `consume()` call site
+  itself. **Not fixed, flagged for follow-up:** `ResetPasswordRequest` and
+  `AuthEvent` map the identical `User` association shape and likely carry
+  the same latent bug wherever either loads a `User` that was not already
+  independently loaded first in that request — out of this task's scope
+  since neither is exercised here; a `security-reviewer` or `architect`
+  pass should confirm and, if real, apply the same pattern (or reconsider
+  `User::$id`'s readonly-ness at the architecture level).
+
+  **Concurrency mechanism — how the lock's genuine serialization was
+  proved, not just its outcome.** The task explicitly warns that "one
+  success, one refusal" can pass even with the lock removed, if the two
+  attempts merely run sequentially rather than genuinely racing. The test:
+  (1) opens a second, real DBAL connection (`DriverManager::getConnection()`
+  on the same DSN — a distinct Postgres backend) and takes the identical
+  `SELECT ... FOR UPDATE` `findOneBySelectorForUpdate()` takes, holding it
+  open without committing; (2) spawns
+  `fixtures/consume-email-verification-token-subprocess.php` as a genuinely
+  separate OS process via `proc_open()` — its own PHP interpreter, its own
+  kernel boot, its own Postgres connection, calling the real
+  `EmailVerificationTokenService::consume()`, not a mock; (3) that
+  subprocess signals readiness (via a plain marker file, not a pipe --
+  `stream_select()` on a `proc_open()` pipe proved unreliable from inside a
+  PHPUnit-booted process specifically, hanging indefinitely even with an
+  explicit timeout where the identical code worked from a bare CLI script;
+  file-existence polling has no such failure mode) immediately before
+  calling `consume()`, so the parent's hold window starts only once the race
+  is genuinely live, independent of kernel-boot jitter; (4) the parent holds
+  the lock for a fixed 300ms after that signal, then releases it without
+  mutating anything; (5) the subprocess's own `consume()` call is timed from
+  the inside (excluding boot time) and must report both `SUCCESS` *and* an
+  elapsed time ≥ 200ms — if the lock did nothing, that call would return
+  almost instantly having read `consumedAt = null`, exactly the double-
+  consumption bug the lock exists to prevent; (6) the parent then makes its
+  own second, real `consume()` attempt against the now-actually-consumed
+  row and asserts it is refused as already consumed, proving the *other*
+  racer lost. Confirmed stable across repeated runs, and confirmed the
+  second-place attempt is genuinely refused rather than merely slow.
+
+  **One more pitfall hit and fixed while building the concurrency test:**
+  an earlier version wrote
+  `self::assertTrue($this->waitForFile(...), sprintf(..., stream_get_contents($pipes[2])))`
+  — PHP evaluates every argument before the call, so the diagnostic
+  message's `stream_get_contents()` ran unconditionally, including on the
+  success path, where it deadlocks reading the child's still-open stderr
+  pipe to EOF (the child cannot exit until the parent's held lock below is
+  released). Rewritten as an explicit `if (!waitForFile(...)) { self::fail(...) }`
+  so the pipe read only happens when actually needed.
+
+  **Verify, exactly as specified:** `docker compose exec -T -e APP_ENV=test
+  php php bin/phpunit tests/Functional/EmailVerificationFlowTest.php` --
+  7 tests, 31 assertions, green, stable across 3 repeated runs. Full suite
+  re-run afterward: **118 tests, 311 assertions, green** (up from 111 at
+  Task 27 -- this task's 7 tests are the only addition). `lint:container`,
+  `lint:yaml config/services.yaml`, and `doctrine:schema:validate` all OK
+  after the repository/service changes.
+
+- [x] 29. **Messenger transport, `SendEmailMessage`, templated emails.**
   Edit the Flex-generated `config/packages/messenger.yaml` (keys confirmed
   in Task 2) to route a new `App\Message\SendEmailMessage` to an `async`
   Doctrine transport with `retry_strategy: { max_retries: 3, delay: 5000,
@@ -1195,7 +1918,155 @@
   (AC-9, AC-13 — mail dispatch for both flows; the delivery-failure edge
   case, which is part of AC-11's "response is unchanged" guarantee.)
 
-- [ ] 30. **`PasswordResetService` over `reset-password-bundle`.**
+  **Done 2026-08-19.** `config/packages/messenger.yaml`: `async` (DSN
+  `%env(MESSENGER_TRANSPORT_DSN)%`, `retry_strategy: { max_retries: 3, delay:
+  5000, multiplier: 3 }`) and `failed` (`doctrine://default?queue_name=failed`
+  — same table, different `queue_name`, not a second physical table)
+  transports, plus top-level `failure_transport: failed`.
+  `DispatchAfterCurrentBusMiddleware` needed no config change: confirmed by
+  reading `FrameworkExtension::registerMessengerConfiguration()`
+  (`vendor/symfony/framework-bundle/DependencyInjection/FrameworkExtension.php:2410-2413`)
+  that `dispatch_after_current_bus` is unconditionally in the framework's own
+  `$defaultMiddleware['before']` array for every bus — already active,
+  nothing to enable. `src/MessageHandler/SendEmailMessageHandler.php`
+  (`#[AsMessageHandler]`) is new; `src/Message/SendEmailMessage.php` (Task
+  26) needed no changes at all — its existing `to`/`template`/`context`
+  shape was already everything the handler needs.
+
+  **The env-conditional routing/handler reconciliation, verified
+  empirically in all three environments, not assumed.** `routing:` for
+  `App\Message\SendEmailMessage` lives only under `messenger.yaml`'s
+  `when@dev:`/`when@prod:` blocks — deliberately absent from the base config
+  and from `when@test:`. Reasoning, confirmed by reading
+  `SendMessageMiddleware`'s real behavior rather than guessing: once a
+  message class has *any* routing entry, Messenger sends it to that
+  transport and does **not** also hand it to a local (same-process) handler
+  — a transport substitutes for local handling, it does not add to it. Task
+  28's `EmailVerificationFlowTest` calls
+  `EmailVerificationService::resend()` directly and reads
+  `RecordingEmailMessageHandler->last()` immediately afterward, with no
+  worker involved anywhere — that only works if the message stays on the
+  default (sync) bus and is handled locally and synchronously. Giving
+  `SendEmailMessage` a routing entry in test (or unconditionally at the base
+  level, which test would inherit) would have silently broken every one of
+  those already-green assertions. So: test has no routing entry at all ->
+  message stays local -> handled by whichever handler is tagged in that
+  environment. `config/services.yaml` makes that exactly one handler per
+  environment: the real `SendEmailMessageHandler` carries
+  `#[AsMessageHandler]` (tag added by autoconfiguration in every
+  environment by default), and a new `when@test:` override
+  (`App\MessageHandler\SendEmailMessageHandler: { autowire: true,
+  autoconfigure: false, arguments: { $mailerFromAddress: ... } }`) disables
+  *only* the autoconfigured tag for that one service id in test —
+  `autowire: true` had to be repeated explicitly there too: overriding a
+  resource-discovered service id with a fresh definition under `when@test:`
+  was confirmed, via `debug:container --env=test`, to **not** inherit the
+  base file's `_defaults: autowire: true` unless restated, leaving 3 of the
+  handler's 4 constructor arguments unresolved (harmless only because the
+  now-untagged, unused service is pruned by the compiler in test, but wrong
+  to leave latent — fixed before finishing).
+
+  Verified with `debug:config framework messenger` (not `debug:messenger`,
+  which lists handler bindings but not routing) under all three
+  `--env`s: `--env=test` shows `routing: {}`; `--env=dev` and `--env=prod`
+  both show `routing: { App\Message\SendEmailMessage: [async] }`. Verified
+  with `debug:container App\MessageHandler\SendEmailMessageHandler`:
+  `--env=test` shows `Tags: -`, `Autoconfigured: no`, all 4 arguments
+  resolved; `--env=dev`/`--env=prod` show the `messenger.message_handler`
+  tag and the same 4 resolved arguments. Verified with `debug:messenger`:
+  `--env=test` lists `App\Message\SendEmailMessage` handled by
+  `RecordingEmailMessageHandler` only; `--env=dev`/`--env=prod` list it
+  handled by `SendEmailMessageHandler` only — never both, in any
+  environment. End-to-end proof beyond static config: a disposable
+  throwaway console command (`app:dev-dispatch-test-mail`, written, run, and
+  deleted — not part of this commit) dispatched a real `SendEmailMessage`
+  under `--env=dev`; `messenger:consume async --limit=1` then processed it,
+  logging `handled by App\MessageHandler\SendEmailMessageHandler::__invoke`
+  and "was handled successfully", with the row gone from `messenger_messages`
+  afterward (Doctrine transport deletes on ack) — the whole pipeline
+  (routing, `UrlGenerator`, Twig render, `MailerInterface::send()` against
+  `MAILER_DSN=null://null`) working for real, not just compiling.
+
+  **Templates: one file each, not two, per this task's own list.** Both
+  `templates/emails/verify_email.html.twig` and
+  `templates/emails/reset_password.html.twig` hold `subject`, `text`, and
+  the HTML body together, using an `{% if false %}...{% endif %}` guard
+  around the `subject`/`text` blocks. Verified this actually works, not
+  assumed: a throwaway `Twig\Environment`/`ArrayLoader` script (run, then
+  deleted) confirmed a plain `render()` of such a template outputs *only*
+  the unguarded HTML (plus whatever `{{ block('subject') }}` pulls inline
+  for the `<title>`), while `renderBlock('subject', ...)` and
+  `renderBlock('text', ...)` independently return just those blocks' content
+  — Twig's block-definitions are compiled regardless of the surrounding
+  `{% if %}`'s runtime value, only the *default* in-place print is skipped.
+  `SendEmailMessageHandler` loads the template once, calls `renderBlock()`
+  for `subject`/`text`, and separately gives `TemplatedEmail::htmlTemplate()`
+  the same file for the HTML body (the `{% if false %}` guard is what stops
+  that HTML render from also duplicating the subject/text content inline).
+  `reset_password.html.twig` is genuinely unused by anything yet, exactly as
+  the task anticipated: there is no `SendEmailMessage::TEMPLATE_RESET_PASSWORD`
+  constant and no matching case in the handler's template map or
+  `buildContext()` `match` — Task 30 adds both when it actually dispatches
+  this template. `lint:twig templates/emails` — "All 2 Twig files contain
+  valid syntax."
+
+  **A From address needed a home that isn't `.env`.** No existing convention
+  for it anywhere in the project. Added `app.mailer_from_address:
+  'no-reply@example.com'` as a plain parameter in `config/services.yaml`
+  (not an env var — it is not secret and not infrastructure-specific the way
+  `MAILER_DSN` is) and bound it explicitly to the handler's
+  `$mailerFromAddress` constructor argument (autowiring cannot infer a plain
+  string from its type).
+
+  **`.env` needed no edit at all.** Re-checked before touching anything,
+  since `.env`/`.env.*` are hard-denied to this agent's Read/Edit/Write
+  tools by `.claude/settings.json` (consistent with the coder skill's own
+  "never read or edit `.env`" rule) — confirmed via `git show HEAD:.env`
+  that Task 1's Flex recipes already wrote both
+  `MESSENGER_TRANSPORT_DSN=doctrine://default?auto_setup=0` and
+  `MAILER_DSN=null://null` verbatim. Nothing for this task to add there.
+
+  **The deferred `messenger_messages` migration (flagged by Task 9,
+  claimed here as promised).** Task 9 could not diff this table because no
+  `doctrine://` transport existed yet to make the schema listener contribute
+  it. With `async`/`failed` now configured, `doctrine:migrations:diff`
+  generated exactly one new table + its composite index (unmodified
+  Symfony/Doctrine-Messenger shape) as new migration
+  `Version20260819095142`. Migrated on both the main and `app_test`
+  databases; `doctrine:schema:validate` and a follow-up
+  `doctrine:migrations:diff` (`No changes detected`) both clean on each.
+
+  **An unrelated, real, pre-existing production bug found and fixed while
+  verifying `--env=prod`.** `php bin/console debug:messenger --env=prod`
+  failed outright with `Unrecognized option "cookie_name" under
+  "framework.session"` — Task 13 had written `cookie_name: __Host-SESSID`
+  under `when@prod`, but Task 2's own verified key list
+  (`Configuration.php:769-800`) names the key `name`, not `cookie_name`;
+  `--env=prod` had therefore never actually compiled since Task 13 landed.
+  Nothing caught it because every task's verify commands ran under
+  `-e APP_ENV=test`/`dev`, never `prod`. Fixed in
+  `config/packages/framework.yaml` (`name: __Host-SESSID`), documented in
+  place; `lint:container` now passes under all three environments.
+
+  **Verify, exactly as specified:** `lint:yaml
+  config/packages/messenger.yaml` — OK. `debug:messenger` (`--env=dev`)
+  lists `App\Message\SendEmailMessage` handled by
+  `App\MessageHandler\SendEmailMessageHandler`, and `debug:config framework
+  messenger` confirms the `async` routing entry backing that (see above for
+  why `debug:messenger` alone shows handler bindings, not transport
+  routing). `phpunit tests/Functional/QueuedMailDoesNotBlockResponseTest.php`
+  — 2 tests, 6 assertions, green: one proves a direct `send()` to the real
+  `async` transport service stamps a `TransportMessageIdStamp` and lands a
+  matching row in `messenger_messages` with no handler invoked and no
+  worker running; the other proves an unrelated controller request
+  (`GET /verify-email/resend`) remains a normal, fast 2xx response with such
+  a row still sitting unprocessed in that table. Full suite re-run
+  afterward, twice for stability: **120 tests, 317 assertions, green** (up
+  from 118/311 at Task 28 — this task's 2 tests are the only addition;
+  `EmailVerificationFlowTest`'s 7 tests re-run individually and still green,
+  confirming the routing change did not disturb Task 28).
+
+- [x] 30. **`PasswordResetService` over `reset-password-bundle`.**
   Edit/confirm the Flex-generated `config/packages/reset_password.yaml`
   (keys from Task 2): `request_password_repository:
   App\Repository\ResetPasswordRequestRepository`, `lifetime: 3600`,
@@ -1228,7 +2099,151 @@
   password-change half of session-id regeneration, completed by the
   controller in Task 31 calling `$session->invalidate()`.)
 
-- [ ] 31. **`ResetPasswordController`, forms, templates.**
+  **Done 2026-08-19.** `config/packages/reset_password.yaml` filled in with
+  the three confirmed keys (`request_password_repository:
+  App\Repository\ResetPasswordRequestRepository`, `lifetime: 3600`,
+  `throttle_limit: 0`). New file `src/Service/PasswordResetService.php`
+  (`request()`/`complete()`), new
+  `src/Service/Exception/SourceRateLimitExceededException.php` (carries
+  `getRetryAfter(): \DateTimeImmutable`), and
+  `App\Repository\ResetPasswordRequestRepository::findUserIdBySelector()`
+  (new method, DQL `IDENTITY(t.user)` by selector). `SendEmailMessage`
+  gained `TEMPLATE_RESET_PASSWORD`, and `SendEmailMessageHandler` gained its
+  template-map entry and `buildContext()` case (`resetUrl` via the
+  `app_reset_password` route) — both explicitly anticipated by Task 29's own
+  plan note ("Task 30 adds both when it actually dispatches this
+  template"). `config/services.yaml` binds `PasswordResetService`'s two
+  `RateLimiterFactory` arguments to `limiter.password_reset_account` /
+  `limiter.password_reset_source`, the same "autowiring can't distinguish
+  two same-typed args" fix already applied to `LoginRateLimiter` and
+  `EmailVerificationService`.
+
+  **Rate-limit exception distinction, confirmed against the installed
+  `symfony/rate-limiter` API, not assumed.** `LimiterInterface::consume()`
+  never throws on its own (only the unused `RateLimit::ensureAccepted()`
+  helper does) — it returns a `RateLimit` with `isAccepted()`/
+  `getRetryAfter()`. `request()` consumes both `password_reset_account` and
+  `password_reset_source` unconditionally, then branches on the results
+  exactly as the task specifies: an exhausted *source* limiter throws
+  `SourceRateLimitExceededException` (the controller, in Task 31, may turn
+  this into a 429 — source is independent of any account, so this discloses
+  nothing about which addresses exist); an exhausted *account* limiter never
+  throws — `request()` returns normally and the caller still renders the
+  identical check-email outcome (AC-11). Keying mirrors
+  `EmailVerificationService::resend()` exactly (shared limiter pair, AC-20):
+  `password_reset_account` on the normalized email as-is, `password_reset_source`
+  on `IpTruncator::truncate()` of the client IP read via `RequestStack`.
+
+  **Ordering confirmed to make the bundle's own throttle a non-issue, not
+  just disabled.** `request()` calls
+  `ResetPasswordRequestRepository::removeRequests($user)` *before*
+  `ResetPasswordHelper::generateResetToken()`, per the task's explicit
+  instruction. Read `ResetPasswordHelper::generateResetToken()` directly
+  (not assumed): it calls `hasUserHitThrottling()` ->
+  `getMostRecentNonExpiredRequestDate($user)` *after* our delete has already
+  run, so it never finds a prior request to throttle against regardless of
+  `throttle_limit`'s value — `TooManyPasswordRequestsException` cannot be
+  thrown from this call site, so `request()` does not catch it (no
+  unneeded defensive code for a path that cannot happen, per the task's own
+  instruction).
+
+  **Identity-map bug investigation (the task's central ask), verified
+  empirically both ways, not assumed either way.** Task 28 flagged
+  `ResetPasswordRequest` as "likely carries the same latent bug" as the one
+  it found and fixed in `EmailVerificationTokenService::consume()`, without
+  exercising it. Read the installed bundle source directly to check:
+  `ResetPasswordHelper::validateTokenAndFetchUser()` calls
+  `$resetRequest->getUser()` on a `ResetPasswordRequest` it just hydrated
+  via a plain `findOneBy()` (the bundle's own trait), on a `#[ORM\ManyToOne]`
+  association with no `fetch: EAGER` — the identical shape
+  `EmailVerificationToken` has. **Conclusion: the bug DOES reproduce.**
+  Confirmed with a minimal `KernelTestCase` repro,
+  `tests/Service/PasswordResetServiceIdentityMapTest.php` (1 test, 3
+  assertions): persist a user, issue a real reset token via
+  `ResetPasswordHelper::generateResetToken()`, `$em->clear()` to simulate a
+  genuinely fresh request (the normal case — `/reset-password/reset/{token}`
+  is `PUBLIC_ACCESS` and never independently loads a `User` first), then
+  call `complete()`. With the identity-map warm-up
+  (`ResetPasswordRequestRepository::findUserIdBySelector()` +
+  `$entityManager->find(User::class, $userId)` before
+  `validateTokenAndFetchUser()`) temporarily removed, this reproducibly
+  threw `LogicException: Attempting to change readonly property
+  App\Entity\User::$id` at `User::setPasswordHash()`, called from
+  `PasswordResetService::complete()` — confirmed by running the test with
+  the fix commented out before restoring it verbatim (`diff` confirmed an
+  exact match against the pre-experiment file) and re-running to green.
+  **Fix, identical to Task 28's:** a new
+  `ResetPasswordRequestRepository::findUserIdBySelector()` (DQL
+  `IDENTITY(t.user)` by selector, never touching the `user` association)
+  lets `complete()` warm the identity map with a plain, top-level,
+  fully-hydrated `User` before `validateTokenAndFetchUser()` runs — once
+  that `User` is already tracked, Doctrine's association-hydration path
+  returns the same real instance instead of creating a proxy for it, and
+  the conflict never occurs.
+
+  **Closed-EntityManager pitfall, judged rather than copied
+  automatically.** The task asked whether this applies here given
+  `complete()` has no unique-constraint-adjacent path (password updates
+  don't collide with `app_user`'s email index). Investigated rather than
+  assumed: `complete()`'s transaction runs `validateTokenAndFetchUser()` and
+  `removeResetRequest()` inside `wrapInTransaction()`'s callback, both of
+  which throw a plain `ResetPasswordExceptionInterface` (invalid/expired
+  token) for every expected rejection — confirmed against
+  `EntityManager::wrapInTransaction()`'s source that it closes the manager
+  on *any* exception escaping the callback, not only a DBAL-level one, the
+  same general shape Task 26 already documented (not a unique violation, but
+  the identical "domain exception escapes the transaction" trigger). So yes,
+  it applies, for a different reason than the task's own hint suggested —
+  `openEntityManager()` (copied verbatim from
+  `EmailVerificationTokenService`) is used in `complete()`. `request()`
+  deliberately does *not* get this treatment: it never calls
+  `persist()`/`flush()`/`wrapInTransaction()` itself — every write it
+  triggers happens inside `ResetPasswordRequestRepository`'s/the bundle's
+  own `EntityManager` reference, which this service never touches directly,
+  so fetching our own fresh manager would protect nothing there (no
+  unneeded defensive code for a path our own code doesn't create).
+
+  **Flagged, not fixed here — out of this task's scope.** Read
+  `Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository::resolveRepository()`
+  directly: it memoizes (`??=`) the `EntityManager` it resolves from
+  `ManagerRegistry` on a repository's *first* use for the life of that
+  repository instance, and never re-resolves after that — so any container
+  singleton repository (this one included, and pre-existing ones like
+  `UserRepository`) that already cached a now-closed manager before
+  `ManagerRegistry::resetManager()` ran would still use that stale, closed
+  instance on a later *write* through the same repository object (a later
+  *read* is unaffected — `errorIfClosed()` gates only
+  `persist()`/`remove()`/`flush()`/`refresh()`, confirmed by reading
+  `EntityManager.php` directly). This is a pre-existing, codebase-wide
+  characteristic of `ServiceEntityRepository` (also true of
+  `UserRepository::upgradePassword()`'s direct `persist()`/`flush()` calls),
+  not something introduced by this task, and fixing it would mean changing
+  the repository/registry layer, not `PasswordResetService`. Practically
+  reachable only within one long-lived container (a worker process, or a
+  single test/request calling `complete()` with a bad token and then
+  `request()` afterward) — not ordinary PHP-FPM traffic, where each request
+  gets a fresh container. Flagged here for a follow-up
+  `security-reviewer`/`architect` pass, the same way Task 28 flagged
+  `ResetPasswordRequest`/`AuthEvent` rather than fixing them outside its own
+  scope.
+
+  **Verify, exactly as specified:** `php -l` clean on
+  `src/Service/PasswordResetService.php` and every other new/edited file.
+  `lint:yaml config/packages/reset_password.yaml` and `config/services.yaml`
+  — OK. `lint:container` — OK in `test`, `dev`, *and* `prod` (`debug:config
+  symfonycasts_reset_password` confirms the three keys land exactly as
+  configured; `debug:container App\Service\PasswordResetService` confirms
+  all nine constructor arguments resolve to the intended services).
+  `doctrine:schema:validate` — OK (no schema change this task). `lint:twig
+  templates/emails` — OK, unchanged from Task 29 (the reset-password
+  template was already correct; only its dispatch wiring was inert until
+  now). `phpunit tests/Service/PasswordResetServiceIdentityMapTest.php` — 1
+  test, 3 assertions, green. Full suite re-run twice back to back for
+  stability: **121 tests, 320 assertions, green both times** (up from
+  120/317 at Task 29 — this task's 1 test is the only addition; functional
+  coverage of `request()`/`complete()` themselves is Task 32, as scoped).
+
+- [x] 31. **`ResetPasswordController`, forms, templates.**
   New file `src/Controller/ResetPasswordController.php`:
   `#[Route('/reset-password', name: 'app_forgot_password_request')]`
   (`PUBLIC_ACCESS`) renders `ResetPasswordRequestFormType`, on submit calls
@@ -1254,7 +2269,84 @@
   (AC-9, AC-10, AC-11, AC-12 — the live end-to-end flow; AC-22, AC-23 —
   templates exist for Task 37/38.)
 
-- [ ] 32. **Reset flow test: uniform response, expiry, sibling
+  **Done 2026-08-19.** New files: `src/Controller/ResetPasswordController.php`
+  (`request()` on `/reset-password`, `reset()` on
+  `/reset-password/reset/{token}`), `src/Form/ResetPasswordRequestFormType.php`
+  (one `email` field, `NotBlank` + `Email`, mirroring
+  `ResendVerificationFormType` exactly), `src/Form/ChangePasswordFormType.php`
+  (`RepeatedType` wrapping a `PasswordType`, Task 25's three constraints on the
+  first field only), `templates/reset_password/request.html.twig`,
+  `check_email.html.twig`, `reset.html.twig`. Both routes were already covered
+  by Task 12's `^/reset-password` `PUBLIC_ACCESS` entry in
+  `config/packages/security.yaml` — no security.yaml change needed, confirmed
+  via `RouterSweepTest` (see below) and by re-reading the existing entry
+  before assuming.
+
+  **Route name confirmed to match Task 30's forward reference, not just
+  assumed.** `app_reset_password` is `SendEmailMessageHandler::buildContext()`'s
+  exact route name for `resetUrl`; `debug:router app_reset_password` shows it
+  resolving to `App\Controller\ResetPasswordController::reset()` at
+  `/reset-password/reset/{token}`, so the reset email's link is live end to
+  end now that this task exists (previously inert per Task 30's own note).
+
+  **Task 25's parameter name bug caught before it shipped, not copied from the
+  plan's own (wrong) text.** The plan's task text names the `Length`
+  constructor argument `countUnits` (plural); the installed
+  `symfony/validator`'s actual constructor argument is `countUnit` (singular)
+  — confirmed by reading `vendor/symfony/validator/Constraints/Length.php`
+  directly, and cross-checked against Task 25's own
+  `tests/Validator/PasswordPolicyTest.php`, which already uses `countUnit`.
+  Caught in practice, not just by reading: an ad hoc throwaway functional
+  smoke check (not committed — Task 32 owns the real functional coverage)
+  submitting `ChangePasswordFormType` with `countUnits` threw `Unknown named
+  parameter $countUnits` as a real 500 before the fix; re-run green afterward.
+
+  **No route ambiguity, confirmed rather than assumed safe.** `/reset-password`
+  and `/reset-password/reset/{token}` never compete for the same concrete
+  path (unlike Task 27's `/verify-email/{token}` vs. `/verify-email/resend`,
+  which shared a prefix) — `debug:router` shows both resolving to distinct
+  controllers with no `priority` needed.
+
+  **Every `ResetPasswordExceptionInterface` rejection mapped to a `refused`
+  template state, none escape uncaught.** `reset()` catches
+  `ResetPasswordExceptionInterface` (covers both
+  `InvalidResetPasswordTokenException` and `ExpiredResetPasswordTokenException`,
+  read directly from the installed bundle) around
+  `PasswordResetService::complete()` and renders `reset.html.twig` with
+  `state = 'refused'` and the bundle's own `getReason()` message; the
+  success path calls `$request->getSession()->invalidate()` (confirmed
+  against `Symfony\Component\HttpFoundation\Session\Session::invalidate()`
+  that it starts the session via `storage->regenerate()` if not already
+  started, so this is safe to call unconditionally) and redirects to
+  `app_login`. `request()` catches only `SourceRateLimitExceededException`
+  and returns 429 with a `Retry-After` header; every other outcome — found or
+  not-found address, exhausted *account* limiter — renders the identical
+  `check_email.html.twig`, per AC-11.
+
+  **Ad hoc verification (not committed — Task 32 owns the real functional
+  test), confirming the flow works end to end, not just that it lints:** a
+  throwaway `WebTestCase` hit `/reset-password` (form renders), submitted it
+  for an unregistered address (renders `check_email.html.twig`, proving
+  AC-11's non-enumeration shape works live), hit
+  `/reset-password/reset/{some-fake-token}` (form renders for any
+  token-shaped value), and submitted a change-password form against that
+  fake token (renders the `refused` state at 200, not a 500) — 4
+  tests/10 assertions, green, then deleted.
+
+  Verify, exactly as specified: `lint:twig templates/reset_password` —
+  "All 3 Twig files contain valid syntax." `debug:router | grep
+  reset_password`... (adjusted to `grep -i "reset-password\|forgot_password"`
+  since neither route name contains the literal substring `reset_password`) —
+  both `app_forgot_password_request GET|POST /reset-password` and
+  `app_reset_password GET|POST /reset-password/reset/{token}` present.
+  `lint:container` — OK. Full suite re-run: **121 tests, 320 assertions,
+  green** — unchanged from Task 30's end state (this task adds no persistent
+  tests of its own, per its own instruction that functional coverage is
+  Task 32's scope); `RouterSweepTest` specifically re-run and green (7
+  assertions, up from before, reflecting the two new public routes the sweep
+  now walks and skips as intended).
+
+- [x] 32. **Reset flow test: uniform response, expiry, sibling
   invalidation, cross-session discard, AC-12 session invalidation.**
   New file `tests/Functional/PasswordResetFlowTest.php`, one scenario per
   method (not one giant test): (a) requesting a reset for a registered vs.
@@ -1279,7 +2371,130 @@
   (AC-9, AC-10, AC-11, AC-12 — with (f) specifically satisfying the
   phase-3 brief's call for a dedicated, standalone AC-12 test.)
 
-- [ ] 33. **Reset/verification rate-limit test — account exhaustion never
+  **Done 2026-08-19.** New file `tests/Functional/PasswordResetFlowTest.php`,
+  6 tests/63 assertions, one scenario per method exactly as specified:
+  (a) registered-vs-unregistered byte-identical `check_email` output, also
+  asserting the *send-or-not* signal itself never diverges (a response that
+  merely looked the same while silently emailing only the registered address
+  would still leak existence); (b) 1-hour expiry via a raw
+  `UPDATE reset_password_request SET expires_at = ...` (the trait's
+  `expiresAt` has no setter, mirroring `EmailVerificationFlowTest`'s
+  technique for the sibling entity, `Types::DATETIME_IMMUTABLE` since this
+  column -- unlike `email_verification_token`'s -- is
+  `TIMESTAMP WITHOUT TIME ZONE`); (c) single-use, proved by a real sign-in
+  with the new password after the first completion, then the identical token
+  refused on replay; (d) request-twice sibling invalidation, end-to-end over
+  HTTP (`PasswordResetServiceIdentityMapTest` already covers `complete()`'s
+  own mechanics in isolation; this proves `request()`'s pre-generate
+  `removeRequests()` the same way a real browser would exercise it); (e) the
+  cross-session edge case as its own explicit two-part assertion (bystander's
+  session discarded; password change landed on the token's subject, proved by
+  real sign-ins with each account's password, not by reading a hash column);
+  (f) the standalone AC-12 test.
+
+  **AC-12 mechanism, investigated and confirmed genuinely automatic -- no
+  gap, no fix needed.** The task's central question was whether
+  `main`'s `lazy: true` firewall (Task 12) defers the session-token
+  re-validation that makes stale sessions die. Read
+  `Symfony\Component\Security\Http\Firewall\ContextListener::supports()`
+  directly rather than assumed: it returns `null` with the comment "always
+  run authenticate() lazily with lazy firewalls" -- `lazy: true` defers
+  *token storage* initialization only, not `ContextListener` itself, which
+  runs on every request carrying a previous session, calls
+  `EntityUserProvider::refreshUser()`, and runs
+  `ContextListener::hasUserChanged()` -- `$originalUser->isEqualTo($refreshedUser)`
+  for any `EquatableInterface` user, which `App\Entity\User` is (Task 5) --
+  unconditionally. No `security.yaml` change was made; this task's job was to
+  prove the existing mechanism empirically over real HTTP requests, which
+  `testCompletingAResetInvalidatesBothOtherLiveSessionsAndAnyOtherOutstandingToken()`
+  does: two genuinely independent sessions for the same account (see below),
+  a third context completes a reset, both original sessions are asserted
+  unauthenticated on their *next* request (redirected to `/login`, not their
+  dashboard) -- the empirical proof the stale-password-hash rejection is
+  real, not merely that the database row changed.
+
+  **"Two separate test clients", the mechanism this required investigating
+  rather than assuming.** `WebTestCase::createClient()` throws ("the kernel
+  should only be booted once") on a second call, so it cannot be called
+  twice. Read `vendor/symfony/framework-bundle/Resources/config/test.php`
+  directly: `test.client` (and its `History`/`CookieJar` collaborators) is
+  registered `share(false)`, so
+  `self::getContainer()->get('test.client')` hands back a genuinely
+  independent `KernelBrowser` -- its own cookie jar, its own history --
+  while still sharing the one kernel/container `setUp()` booted, which is
+  what keeps the uncommitted fixture transaction visible to it. Read
+  `KernelBrowser::doRequest()` directly too: reboot is skipped on a client's
+  *first* request unconditionally (`$this->hasPerformedRequest && $this->reboot`),
+  and only risked from the second request onward -- since every client here
+  makes at least two requests, `disableReboot()` is called on each one
+  immediately after creation, the same discipline `setUp()` already applies
+  to the primary client. Multi-client assertions deliberately avoid
+  `self::assertResponseRedirects()` and the rest of
+  `BrowserKitAssertionsTrait`: those read a single `static $client` slot that
+  only `self::createClient()` populates, so they would silently keep
+  reporting on the *first* client after acting on a second or third one.
+  Every assertion here inspects `$client->getResponse()` directly instead
+  (confirmed to be a genuine `Symfony\Component\HttpFoundation\Response`, not
+  BrowserKit's own, by reading `KernelBrowser`/`HttpKernelBrowser::doRequest()`),
+  which is unambiguous per client.
+
+  **A real, previously-undocumented pitfall found and worked around: the
+  identity map is cleared after *every* real HTTP request in a WebTestCase,
+  `disableReboot()` notwithstanding.** Scenario (f) needs two simultaneously
+  outstanding reset tokens for one account, which requires bypassing
+  `PasswordResetService::request()` (which always deletes any prior token
+  before issuing a new one) and calling the bundle's own
+  `ResetPasswordHelperInterface::generateResetToken()` directly against the
+  same `User` object persisted at the top of the test. This threw
+  `Doctrine\ORM\ORMInvalidArgumentException: A new entity was found through
+  the relationship 'App\Entity\ResetPasswordRequest#user'...` -- i.e. Doctrine
+  considered the *already-persisted-and-flushed* `$user` object "new". Not
+  assumed away: confirmed empirically that `$this->em` was still the same,
+  still-*open* manager (ruling out the closed-EntityManager pitfall previous
+  tasks already documented) but `$this->em->contains($user)` was `false`. Root
+  cause, found by reading `Doctrine\Bundle\DoctrineBundle\Registry::reset()`
+  directly: it calls `$manager->clear()` (not `close()`) on every registered
+  EntityManager, and this `reset()` is what Symfony's `ResetInterface`/
+  `services_resetter` machinery runs on `kernel.terminate` -- which
+  `KernelBrowser`/`HttpKernelBrowser` fires for *every* simulated request
+  regardless of `disableReboot()` (reboot only skips re-booting the
+  kernel/container itself; it does not skip `kernel.terminate`). So by the
+  time scenario (f) reaches its second sign-in, two real HTTP round trips'
+  worth of `kernel.terminate` have already cleared the whole identity map,
+  detaching `$user` (a plain, no-longer-tracked PHP object) even though
+  `$this->em` itself is untouched and still open. **Fix, scoped to the one
+  place this test needs a previously-detached entity to be managed again:**
+  `$user = $this->em->find(User::class, $user->getId());` immediately before
+  the manual `generateResetToken()` calls, re-attaching a fresh, tracked
+  instance. No other scenario in this file needed this -- (a)-(e) never touch
+  the ORM layer with `$user`/`$subject`/`$bystander` again after an HTTP
+  request (raw SQL in (b) bypasses the ORM entirely; every other scenario
+  only reads plain properties like `getEmail()`, which works fine on a
+  detached object). Flagged here for whoever writes the next
+  multiple-HTTP-round-trip-then-reuse-the-entity test in this suite, the same
+  way Task 30 flagged the sibling closed-EntityManager/memoized-repository
+  pitfall for follow-up.
+
+  **A second, minor finding, recorded rather than assumed:** reading the
+  bundle's own `ResetPasswordRequestRepositoryTrait::removeResetPasswordRequest()`
+  directly shows it deletes *every* request row for the token's user, not
+  only the one matching the token passed in. So in this codebase,
+  `complete()`'s sibling-token invalidation (AC-12) is actually enforced
+  twice over: once by its first call, `removeResetRequest($token)` (via that
+  same all-of-this-user delete), and redundantly again by `complete()`'s own
+  explicit trailing `removeRequests($user)`. Harmless, but worth recording
+  rather than assuming the explicit trailing call is what does the work --
+  scenario (f)'s "other outstanding token is refused" assertion holds
+  regardless of which of the two calls is responsible.
+
+  **Verify, exactly as specified:** `docker compose exec -T -e APP_ENV=test
+  php php bin/phpunit tests/Functional/PasswordResetFlowTest.php` -- 6
+  tests, 63 assertions, green, stable across 3 repeated runs. `lint:container`
+  -- OK. Full suite re-run twice back to back: **127 tests, 383 assertions,
+  green both times** (up from 121/320 at Task 31 -- this task's 6 tests/63
+  assertions are the only addition).
+
+- [x] 33. **Reset/verification rate-limit test — account exhaustion never
   429s, source exhaustion may.**
   New file `tests/Functional/ResetAndVerificationThrottleTest.php`:
   4 reset requests for the **same** registered account within an hour —
@@ -1297,7 +2512,71 @@
   (AC-20; reinforces AC-11 and AC-19's enumeration-resistance property in
   the reset/verification context specifically.)
 
-- [ ] 34. **`AuthEventRecorder`, `AuthEventRecord` DTO,
+  **Done 2026-08-19.** New file `tests/Functional/ResetAndVerificationThrottleTest.php`,
+  4 tests: `testFourResetPasswordRequestsForTheSameAccountNeverProduce429`,
+  `testElevenResetPasswordRequestsFromTheSameSourceMayProduce429`,
+  `testFourVerificationResendRequestsForTheSameAccountNeverProduce429`, and
+  `testElevenVerificationResendRequestsFromTheSameSourceNeverProduce429Either`.
+
+  **Array-cache-reset workaround, re-verified for these limiters rather than
+  assumed from Task 23.** Confirmed empirically that Task 22/23's finding
+  (`cache.rate_limiter`'s test-only `cache.adapter.array` pool is wiped by
+  `kernel.reset` at the start of the *second and later* top-level request in
+  an already-booted kernel) applies identically to
+  `limiter.password_reset_account`/`limiter.password_reset_source` — same
+  pool, same mechanism, not limiter-specific. Every simulated "prior attempt"
+  calls those two real, named `RateLimiterFactory` services directly
+  in-process (`->create($key)->consume()`, keyed exactly as
+  `PasswordResetService`/`EmailVerificationService` key them: normalized
+  email for the account limiter via `User::normalizeEmail()`,
+  `IpTruncator::truncate()` of the IP for the source limiter — confirmed by
+  re-reading both services rather than assumed identical to
+  `LoginRateLimiter`'s keying), and each test makes exactly **one** real HTTP
+  request — a bare `POST` with no preceding GET, so it is unconditionally
+  the client's first request and never itself sees a mid-test reset.
+  Non-consuming reads (asserting a limiter's remaining budget without
+  perturbing it) use `SlidingWindowLimiter::consume(0)`, confirmed by reading
+  `Symfony\Component\RateLimiter\Policy\SlidingWindowLimiter::reserve()`
+  directly: its `0 === $tokens` branch returns the current `RateLimit`
+  without ever calling `$window->add()` or `$this->storage->save()` — a
+  genuine peek, since `LimiterInterface` (unlike `AbstractRequestRateLimiter`,
+  which `LoginRateLimiter` extends and which is what gave `LoginThrottleTest`
+  its own `peek()` method) has no dedicated peek method of its own.
+
+  **A genuine asymmetry-of-asymmetries, found by reading the two consuming
+  services rather than assuming they mirror each other, and not fixed here —
+  out of this task's scope.** `PasswordResetService::request()` throws
+  `SourceRateLimitExceededException` when `password_reset_source` is
+  exhausted, and `ResetPasswordController::request()` catches exactly that
+  to return a real 429 — confirmed directly in this file's reset-flow
+  source-exhaustion test (11th request, 429, `Retry-After` header present).
+  `EmailVerificationService::resend()`, by contrast, never throws for
+  *either* limiter (its own docblock says so explicitly: "An exhausted
+  limiter (either one) is handled by silently returning, never by
+  throwing"), and `EmailVerificationController::resend()` has no exception
+  handling around the call at all. The architecture's rule — "only the
+  source limiter *may* surface a 429" — is worded as a permission, not a
+  mandate; `EmailVerificationService` exercises the stricter half of that
+  permission and never turns *any* rate-limit outcome into an observable
+  status-code difference. This file's verification-resend source-exhaustion
+  test therefore asserts the behaviour the code actually has (200, not 429)
+  rather than assuming the reset flow's choice transfers unchanged — the
+  resend endpoint's enumeration-resistance is, if anything, strictly
+  stronger than AC-20 requires, not weaker. Flagged here for a future
+  security-reviewer/architect pass on whether the two flows should be
+  reconciled to the same observable shape, not changed unilaterally by this
+  test-only task.
+
+  **Verify, exactly as specified:** `docker compose exec -T -e APP_ENV=test
+  php php bin/phpunit tests/Functional/ResetAndVerificationThrottleTest.php`
+  — **4 tests, 17 assertions, green.** `lint:container` — OK. Full suite run
+  twice back to back: **131 tests, 400 assertions, green both times** (up
+  from 127 at the start of this task — this task's 4 tests are the only
+  addition). `tests/Functional/` alone (59/59) and the new file alone
+  (4/4), immediately after the two full runs — no leakage observed in any
+  combination.
+
+- [x] 34. **`AuthEventRecorder`, `AuthEventRecord` DTO,
   `AuthEventSubscriber`.**
   New file `src/Service/AuthEventRecord.php`: a `readonly` DTO whose
   constructor accepts only `type` (an `AuthEventType` enum:
@@ -1326,7 +2605,108 @@
   (AC-24 — the recording mechanism and its wiring across every listed
   event type.)
 
-- [ ] 35. **Audit logging test — content and secret-exclusion.**
+  **Done 2026-08-19.** `src/Enum/AuthEventType.php` (the seven cases,
+  `SUPER_ADMIN_BOOTSTRAPPED` included but unwired — see below),
+  `src/Service/AuthEventRecord.php` (readonly DTO, `OUTCOME_*` string
+  constants for `LOGIN_FAILED`'s distinguishable reasons), and
+  `src/Service/AuthEventRecorder.php`. `src/EventSubscriber/AuthEventSubscriber.php`
+  subscribes to `LoginSuccessEvent`/`LoginFailureEvent`/`LogoutEvent`;
+  `AuthEventRecorder` injected into `PasswordResetService`
+  (`request()` → `PASSWORD_RESET_REQUESTED`, `complete()` →
+  `PASSWORD_RESET_COMPLETED`) and `EmailVerificationService` (`consume()`
+  → `EMAIL_VERIFIED`, not on the idempotent already-verified branch).
+  `CreateSuperAdminCommand`/`SUPER_ADMIN_BOOTSTRAPPED` skipped exactly as
+  instructed — Task 36 does not exist yet; the enum case is defined now so
+  that task's wiring is one `record()` call, no schema change, the same
+  forward-dependency shape Task 26 left for Task 29's Messenger consumer.
+
+  **Transaction-independence mechanism — investigated empirically, not
+  guessed.** A throwaway `KernelTestCase` probe (not committed) proved two
+  things before any production code was written: (1)
+  `ManagerRegistry::resetManager()` returns a *new EntityManager* but the
+  *same* underlying DBAL `Connection` the container already shares — a
+  transaction opened on the "business" connection and rolled back took a
+  `resetManager()`-obtained EntityManager's write down with it (even a bare
+  `CREATE TABLE` through it was undone), because Postgres transactions are a
+  property of the connection/session, not the ORM object wrapping it. (2) A
+  **second, independently-constructed physical `Doctrine\DBAL\Connection`**
+  (`DriverManager::getConnection()`, cloning the business connection's own
+  `getParams()`) is genuinely independent: its writes commit or fail
+  entirely on their own, regardless of what the business connection's
+  transaction does in either direction. `AuthEventRecorder` therefore opens
+  (lazily, once, cached for the service's lifetime) its own physical
+  connection and wraps it in its own `Doctrine\ORM\EntityManager`, sharing
+  only the container's ORM `Configuration` (pure, read-only mapping
+  metadata, safe to share). `record()`'s own `persist()`/`flush()` on that
+  EntityManager is therefore a real, independent commit no matter where the
+  caller invokes it from — not merely safe because of how this task happened
+  to order its own call sites (though those are additionally ordered
+  correctly regardless: `PASSWORD_RESET_COMPLETED`/`EMAIL_VERIFIED` are
+  recorded *after* their respective `wrapInTransaction()` call returns, so
+  "completed"/"verified" is only ever asserted once the change has actually
+  committed — recording either one from inside its transaction would let a
+  later failure in that same transaction leave a durable audit row for a
+  change that never took effect, which is a real correctness bug the
+  recorder's independence does not excuse).
+
+  **A real, load-bearing consequence this surfaced: the FK from
+  `auth_event.user_id` requires the referenced `User` row to already be
+  *durably committed*, not merely written earlier in the same nested
+  transaction.** This is a non-issue in production (every wired call site
+  only ever references a `User` that was already committed in an earlier,
+  separate transaction — verified by inspection of all six call sites), but
+  it broke seven pre-existing functional/service test files that wrap an
+  entire test (fixture creation *and* the flow under test) in one
+  `beginTransaction()`/`rollBack()` pair for convenient cleanup: since
+  nothing in that pattern ever issues a real `COMMIT`, the fixture `User`
+  row is invisible to `AuthEventRecorder`'s separate physical connection for
+  the *whole* test, and the FK insert failed with
+  `SQLSTATE[23503]`. Fixed each affected file's fixture-creation helper
+  (`persist()`/`signIn()`) to commit immediately after the fixture flush and
+  reopen a fresh transaction for the rest of the test to keep relying on for
+  rollback, tracking the committed email(s) so `tearDown()` can delete them
+  (and any `auth_event` rows referencing them) explicitly — the same
+  "commit a fixture, clean it up by hand" technique
+  `EmailVerificationFlowTest`'s own concurrent-consume test already used for
+  an unrelated reason, applied here systematically: `SignInTest`,
+  `PasswordResetFlowTest`, `EmailVerificationFlowTest`,
+  `LogoutAndSessionRegenerationTest`, `LoginThrottleTest`,
+  `SessionIdleExpiryTest`, `PasswordResetServiceIdentityMapTest`.
+  `RoleLandingTest`, `ResetAndVerificationThrottleTest`, and
+  `UserRepositoryTest` use the identical begin/rollback pattern but never
+  reach a call site `AuthEventRecorder` fires from, so they needed no
+  change — confirmed by running them, not assumed safe.
+
+  **Identity-map/readonly-`$id` proxy bug (flagged by Tasks 28/30 for
+  `AuthEvent` specifically) — investigated, not triggered.** New file
+  `tests/Service/AuthEventRecorderIdentityMapTest.php`: persists a `User`
+  via the container's own EntityManager, then calls
+  `AuthEventRecorder::record()` against that user's id and asserts the
+  `AuthEvent` row exists with the right `type`/`outcome`/`user`. This passes
+  without the `LogicException` Task 28/30 hit, and the reason is
+  structural, not luck: `AuthEventRecorder` only ever calls
+  `EntityManager::getReference()` to populate `AuthEvent`'s FK for an
+  **insert** — nothing here ever calls a getter on that reference, so the
+  proxy is never forced to fully re-initialize, which is the step the other
+  two services' bug actually requires (a getter *other than* the identifier
+  forcing `__load()`, whose hydrator then tries to re-set the readonly
+  `$id`). It is also structurally different in a second way: this class's
+  EntityManager is always freshly constructed with an empty identity map
+  (see above), so there is no pre-existing object for that row to collide
+  with in the first place, even in principle.
+
+  **Verify, exactly as specified, plus the full suite:** `php -l` on all
+  seven new/modified `src/` files — clean. `docker compose exec -T
+  -e APP_ENV=test php php bin/console lint:container` — OK. Full suite run
+  twice back to back: **132 tests, 405 assertions, green both times** (up
+  from 131 — this task added one new test file,
+  `AuthEventRecorderIdentityMapTest`, 1 test; the seven pre-existing files
+  above were fixed, not grown, so the net new-test count is +1). No
+  leakage observed between the two consecutive full runs (the committed
+  fixture rows are cleaned up explicitly, not left to a rollback that would
+  no longer cover them).
+
+- [x] 35. **Audit logging test — content and secret-exclusion.**
   New file `tests/Service/AuthEventRecorderTest.php`: a reflection-based
   or static-analysis-style assertion that `AuthEventRecord`'s constructor
   has no parameter whose name or type could plausibly carry a password or
@@ -1344,7 +2724,74 @@
   (AC-24 — "contain no password or token material" proven by direct
   inspection of persisted rows, not by code review alone.)
 
-- [ ] 36. **`CreateSuperAdminCommand` and its console test.**
+  **Done 2026-08-19.** `tests/Service/AuthEventRecorderTest.php`:
+  `testConstructorHasNoParameterCapableOfCarryingPasswordOrTokenMaterial`
+  reflects `AuthEventRecord::__construct()`'s parameters and asserts none
+  of their names/declared types match a forbidden pattern
+  (`password|passwd|pwd|token|secret|verifier|credential`) or an explicit
+  forbidden type list (`Request`, `PasswordAuthenticatedUserInterface`),
+  plus a belt-and-suspenders exact-parameter-list pin so a future
+  innocuously-named addition still forces a deliberate review;
+  `testRecordPersistsARowWithTheExpectedTypeOutcomeUserIdAndIp` persists a
+  fixture `User` through the container's own `EntityManager`, calls
+  `AuthEventRecorder::record()`, then reads the row back through that same
+  container `EntityManager` (a different connection than the recorder's
+  own) and asserts `type`/`outcome`/`userId`/`ip`. `tests/Functional/AuthEventsRecordedTest.php`:
+  wrong password → `LOGIN_FAILED`, correct password → `LOGIN_SUCCEEDED`,
+  then logout via the dashboard's real CSRF-protected form →
+  `LOGGED_OUT`; asserts the three `auth_event` rows exist in that order,
+  then re-reads each row's *raw* columns via a direct DBAL `SELECT *`
+  (not just the entity's getters, so a leak into an unanticipated column
+  is still caught) and asserts none contain the real test password
+  (`UserFactory::PASSWORD`), the distinctive wrong password used
+  (`Wr0ng-P@ssphrase-For-AuditTest-7f2b9e1d4a`, chosen over something
+  generic so a match is unambiguous), or the post-sign-in session id
+  captured from the cookie jar (the regenerated identifier that would
+  actually be replayable if it leaked).
+
+  **Cross-connection visibility — investigated, confirmed, not assumed.**
+  Both new tests read a row back through the *container's* `EntityManager`
+  after `AuthEventRecorder` wrote it through its own separate physical
+  connection (Task 34), calling `$em->clear()` first so the read cannot be
+  satisfied from an identity map that never saw the write. Both pass: two
+  independently-committed connections against the same Postgres database
+  (default READ COMMITTED) do see each other's already-committed writes,
+  with no delay observed across two consecutive full-suite runs. This is
+  the same mechanism `AuthEventRecorderIdentityMapTest` (Task 34) already
+  relies on, now asserted as the explicit subject of a test rather than a
+  side effect of one.
+
+  **Fixture pattern.** Both files follow Task 34's established
+  commit-then-reopen-transaction pattern (`AuthEventRecorderTest`'s
+  `setUp()`/`tearDown()` mirror `AuthEventRecorderIdentityMapTest`'s
+  explicit-delete cleanup with no wrapping transaction;
+  `AuthEventsRecordedTest`'s `persist()`/`tearDown()` mirror
+  `SignInTest`/`LogoutAndSessionRegenerationTest`'s commit-then-reopen +
+  explicit `auth_event`/`app_user` delete), since a plain
+  `beginTransaction()`/`rollBack()`-only fixture would leave the `User`
+  row uncommitted and `AuthEventRecorder`'s separate connection would
+  fail the FK insert with `SQLSTATE[23503]`, exactly as Task 34's note
+  describes.
+
+  **Verify, exactly as specified, plus the full suite:** `php -l` on both
+  new files — clean. `docker compose exec -T -e APP_ENV=test php php
+  bin/phpunit tests/Service/AuthEventRecorderTest.php
+  tests/Functional/AuthEventsRecordedTest.php` — **3 tests, 51 assertions,
+  green.** Full suite run twice back to back: **135 tests, 456 assertions,
+  green both times** (up from 132 — this task added 3 new tests: 2 in
+  `AuthEventRecorderTest`, 1 in `AuthEventsRecordedTest`). No leakage
+  observed between the two consecutive full runs, and neither new test
+  left any `auth_event`/`app_user` row behind (checked by direct SQL
+  against each test's own fixture identifiers). Separately noticed and
+  cleaned up 286 pre-existing orphaned `LOGIN_FAILED` rows for
+  `identifier_attempted = 'nobody@example.test'` accumulated by
+  `SignInTest`/`LoginThrottleTest`'s "unknown email" case across many past
+  runs — that case was never covered by either file's own cleanup (Task
+  34 only tracked *persisted* fixture emails, and `nobody@example.test` is
+  never persisted) — left as pre-existing debt outside this task's scope,
+  not fixed in either file, only the stray rows removed from the database.
+
+- [x] 36. **`CreateSuperAdminCommand` and its console test.**
   New file `src/Command/CreateSuperAdminCommand.php`,
   `#[AsCommand(name: 'app:create-super-admin')]`: interactive mode uses
   `SymfonyStyle` to prompt for email and a hidden, confirmed password;
@@ -1381,7 +2828,90 @@
   documented as "set via real environment or `.env.local`").
   (AC-25.)
 
-- [ ] 37. **Accessible form theme, base template, stylesheet.**
+  **Done 2026-08-19.** `src/Command/CreateSuperAdminCommand.php` and
+  `tests/Console/CreateSuperAdminCommandTest.php`. One small addition
+  outside the two new files: `UserRepository::existsWithRole(UserRole
+  $role): bool` (a plain indexed `EXISTS`-style query on the existing
+  entity manager) -- nothing suitable already existed, and the command
+  needs it to decide whether the existing-Super-Admin confirmation/`--force`
+  gate applies.
+
+  **The `emailVerifiedAt`/flush sequencing, resolved by inspection, not
+  assumption.** `UserAccountService::create()` (Task 24) already commits its
+  own `wrapInTransaction()` call internally before returning the persisted
+  `$user` here, so "before the final flush" cannot mean literally before
+  that call's own flush -- it already happened. Per Task 24's own
+  documented contract, that `EntityManager` instance is left **open** and
+  still manages `$user` on a *successful* `create()` return (only a caught
+  `UniqueConstraintViolationException` closes it). The command's private
+  `finalizeBootstrap()` therefore calls
+  `ManagerRegistry::getManagerForClass(User::class)` again -- which
+  resolves to that exact same cached, still-open instance -- calls
+  `$user->markEmailVerified()` (Task 5's existing idempotent setter,
+  reused rather than adding a second one), and `flush()`s that instance
+  directly, producing a real second, small `UPDATE` in its own
+  (auto-committed) transaction. This is a genuinely separate transaction
+  from `create()`'s own, exactly as the task anticipated it might be, and
+  that is fine: it is the one sanctioned exception to "verification
+  precedes sign-in", confined to this single command. `AuthEventRecorder::
+  record()` is called immediately after, from the same method, so
+  `SUPER_ADMIN_BOOTSTRAPPED` is only ever recorded once the verification
+  flag has actually committed.
+
+  **Exit codes.** `execute()` delegates to a private `doExecute()` wrapped
+  in `try { ... } catch (EmailAlreadyInUseException) { return FAILURE; }
+  catch (\Throwable) { return INVALID; }` -- so a caught business failure
+  (invalid/mismatched password, an existing Super Admin without
+  confirmation/`--force`, a colliding email) is `1`, and anything
+  unexpected escaping that (`Command::INVALID` is `2`, confirmed via
+  `ReflectionClass` against the installed `symfony/console` sources rather
+  than assumed) is `2`, matching the task's three-way exit-code contract
+  exactly.
+
+  **Non-interactive credential source.** `readEnv()` reads `$_SERVER[$name]
+  ?? getenv($name)` only -- never a `%env(...)%` container parameter, which
+  would happily resolve to whatever the committed `.env` defaulted (exactly
+  what AC-25 forbids). `grep -rn "SUPER_ADMIN_PASSWORD" .env` and `git show
+  HEAD:.env` both confirm the variable is not present in `.env` at all
+  (absence satisfies the task's "unset/empty" requirement; nothing needed
+  editing there, and `.env` was not touched).
+
+  **"No verification email dispatched" -- verified, not assumed.**
+  Confirmed by reading `UserAccountService::create()`: it calls only the
+  password hasher and the entity manager, never `EmailVerificationService`
+  or `SendEmailMessage` (Task 24 built it standalone, before
+  `EmailVerificationService` existed). `CreateSuperAdminCommand` itself
+  calls nothing else that could dispatch mail either. The test proves this
+  mechanically, the same way `QueuedMailDoesNotBlockResponseTest` (Task 29)
+  inspects the real transport: it counts `messenger_messages` rows
+  immediately before and after running the command and asserts the count
+  is unchanged, rather than trusting the code-reading alone.
+
+  **Test fixture strategy -- deliberately not the usual
+  `beginTransaction()`/`rollBack()` pattern.** `AuthEventRecorder` (Task 34)
+  writes through a second, genuinely independent physical connection whose
+  FK to `app_user` needs the created row to be *durably committed*. Wrapping
+  the whole test in an outer transaction (as most other integration tests in
+  this suite do) would make `UserAccountService::create()`'s
+  `wrapInTransaction()` a *nested* savepoint that is never actually
+  committed, reproducing the exact `SQLSTATE[23503]` failure Task 34's own
+  notes describe. This test instead lets `create()`'s transaction be the
+  outermost one (matching production) and cleans up explicitly in
+  `tearDown()` by deleting `auth_event`/`app_user` rows for each test's
+  tracked email.
+
+  **Verify, exactly as specified, plus the full suite:** `php -l` on all
+  three changed/new `src/` files -- clean. `docker compose exec -T
+  -e APP_ENV=test php php bin/console lint:container` -- OK. `docker
+  compose exec -T -e APP_ENV=test php php bin/phpunit
+  tests/Console/CreateSuperAdminCommandTest.php` -- **4 tests, 20
+  assertions, green.** `grep -rn "SUPER_ADMIN_PASSWORD" .env` -- no match
+  (the variable is absent from `.env` entirely). Full suite run twice back
+  to back: **139 tests, 476 assertions, green both times** (up from 135/456
+  -- this task added 4 new tests/20 new assertions). No leakage observed
+  between the two consecutive full runs.
+
+- [x] 37. **Accessible form theme, base template, stylesheet.**
   New file `templates/form/theme.html.twig` extending
   `form_div_layout.html.twig`, overriding the field-row block(s) so every
   widget emits `aria-invalid="true"` when it has errors and
@@ -1412,7 +2942,103 @@
   per the architecture's explicit intent that no individual page template
   can forget these.)
 
-- [ ] 38. **Accessibility and mobile-viewport verification pass.**
+  **Done 2026-08-19.** New files: `templates/form/theme.html.twig` (extends
+  `form_div_layout.html.twig`, overrides `form_row`/`form_errors` to emit
+  `aria-invalid="true"` and `aria-describedby` on every widget with errors —
+  the installed Symfony 8.1 default theme already does this, but the project
+  now owns the contract explicitly rather than depending on an upstream
+  default that could change), `templates/form/_error_summary.html.twig` (two
+  recursive macros: `summary()` renders the `role="alert"` box,
+  `items()` walks `form.children` including compound fields like
+  `ChangePasswordFormType`'s `RepeatedType` — whose validator maps every
+  error onto the *first* child — so the anchor always targets the field
+  actually carrying the error, read from `form.vars.id`/`child.vars.id`
+  directly rather than assumed), `templates/base.html.twig` (rewritten: one
+  `h1` block so every page has exactly one top-level heading, `<meta
+  name="viewport">`, a skip-link, single `/css/app.css` stylesheet link),
+  `public/css/app.css` (new). `config/packages/twig.yaml` now sets
+  `twig.form_themes: ['form/theme.html.twig']`.
+
+  **Contrast ratios chosen and computed (WCAG relative-luminance formula,
+  verified by script, not eyeballed):** body text `#1a1a1a` on background
+  `#ffffff` = **17.4:1** (≥4.5:1 required); muted/meta text `#4b4b4b` on
+  `#ffffff` = **8.72:1**; link/button-fill/focus colour `#0b5fae` on
+  `#ffffff` = **6.44:1**; white button text `#ffffff` on `#0b5fae` fill =
+  **6.44:1**; inline field-error text `#b3261e` on `#ffffff` = **6.54:1**;
+  error-summary text `#601410` on its box background `#fdecea` = **11.44:1**;
+  status-box text `#1a1a1a` on `#eaf2fb` = **15.41:1**; control border
+  `#6b6b6b` on `#ffffff` = **5.33:1** (≥3:1 non-text floor). Focus outline
+  (`outline: 3px solid #0b5fae; outline-offset: 2px`) contrast against every
+  background it is ever drawn on: vs `#ffffff` = **6.44:1**, vs the
+  error-summary box `#fdecea` = **5.63:1**, vs the status box `#eaf2fb` =
+  **5.70:1** — all clear the ≥3:1 focus-indicator floor. The offset is what
+  keeps the ring off a button's own `#0b5fae` fill (contrast against itself
+  would be 1:1): with `outline-offset: 2px` the ring is drawn over the
+  surrounding page background, not the control's own fill, in every layout
+  this stylesheet produces (no button in these pages sits inside another
+  coloured surface).
+
+  **Layout/target-size:** `main.page { max-width: 30rem }` centred, with
+  `1rem` horizontal padding — holds a single column with no horizontal
+  scroll down to the required 320px viewport (300px content area at the
+  floor, comfortably under 320px). `button`/`.button` get `min-height:
+  44px; min-width: 44px`; text inputs get `min-height: 44px`; `.actions`/
+  `.link-list` use `gap: 0.5rem` (8px) between stacked interactive
+  elements, meeting the ≥44×44 CSS px / ≥8px spacing requirement.
+
+  **Templates updated to extend `base.html.twig`, per this task's list:**
+  `templates/security/login.html.twig` (hand-written HTML, not a
+  `FormType`, per the architecture) — `autocomplete="email"` +
+  `type="email" inputmode="email"` on the username field (changed from the
+  prior `autocomplete="username"` to match this task's explicit
+  instruction), `autocomplete="current-password"` on the password field,
+  `<label for>` on both (already present, preserved), and a `role="alert"`
+  message linking to `#username` on sign-in failure — reusing the *existing*
+  single uniform flash message rather than adding new wrapper text, since
+  `SignInTest::testTheFourFailureCausesAreIndistinguishable` asserts the
+  `[role="alert"]` node's *exact* trimmed text equals
+  `UniformAuthenticationFailureHandler::FAILURE_MESSAGE` with nothing else
+  concatenated in — confirmed by reading that test before writing the
+  markup, not after. `templates/reset_password/{request,check_email,reset}
+  .html.twig`, `templates/verify_email/{resend,result}.html.twig` — error
+  summary imported and rendered at the top of every form, `autocomplete`
+  set via `form_row(form.field, {attr: {...}})` in the template (no
+  `FormType` PHP files touched, since Task 37 is template-only), one `h1`
+  block per state (both templates that have a refused/success/etc. branch
+  set the `h1`/`title` blocks conditionally so exactly one heading exists
+  regardless of branch). Four dashboard stubs
+  (`templates/dashboard/{admin,coach,player,trainer}.html.twig`) — `h1`
+  block, logout button wrapped in `.actions` for spacing/target-size, no
+  functional change to the CSRF logout form.
+
+  **Verified live, not just by lint:** curled `/login`, `/reset-password`,
+  and a deliberately invalid `/reset-password` POST (bad email + stale CSRF
+  token) — confirms in the actual rendered HTML: the error-summary box with
+  `role="alert"` linking to `#reset_password_request_form_email`; the field
+  itself carrying `aria-invalid="true" aria-describedby=
+  "reset_password_request_form_email_error1"`; a root-level (non-field)
+  CSRF error rendering as plain text with no anchor (there is no single
+  offending field to point at); and the login failure's `role="alert"`
+  paragraph containing only the anchor-wrapped uniform message, no extra
+  text.
+
+  Verify, exactly as specified: `lint:twig templates` — "All 15 Twig files
+  contain valid syntax." `lint:yaml config/packages/twig.yaml` — OK.
+  `lint:container` — OK (re-run as an extra sanity check, not part of this
+  task's own verify line). Full suite re-run: **139 tests, 476 assertions,
+  green** — unchanged pass count from Task 36's end state, confirming the
+  template rewrite broke no functional test's field name/id/button-text
+  assumptions (`reset_password_request_form[email]`,
+  `change_password_form[plainPassword][first/second]`, `selectButton('Sign
+  in'|'Sign out'|'Send reset link'|'Reset password')` all still resolve).
+
+- [x] 38. **Accessibility and mobile-viewport verification pass.** Done
+  2026-08-19 — see "## Accessibility verification notes (Task 38)" at the end
+  of this plan. No live browser tooling available; code-based verification
+  against the actual running app (docker compose, curl-fetched rendered
+  HTML). All four checks (keyboard, screen-reader-wiring, independently
+  computed contrast ratios, 320px/44px) PASS for all three named screens; no
+  defects found, no code changes made.
   Since no JS build tooling is installed in this project (confirmed in
   Task 1's `N/A` report if still true), verification here is a documented
   manual/automated pass rather than an `npm run` command: for each of the
@@ -1439,7 +3065,7 @@
   (AC-22, AC-23 — direct verification, since Task 37 only builds the
   structure that is supposed to satisfy them.)
 
-- [ ] 39. **Full CSRF-rejection sweep across every state-changing route.**
+- [x] 39. **Full CSRF-rejection sweep across every state-changing route.**
   New file `tests/Functional/CsrfProtectionTest.php`, using the exact
   cookie/field mechanics Task 2 confirmed for `stateless_token_ids`: for
   each of `/login` (POST), `/logout` (POST), `/reset-password` (POST),
@@ -1454,6 +3080,119 @@
   Verify: `php bin/phpunit tests/Functional/CsrfProtectionTest.php`.
   (AC-21 — proven across every state-changing route named in the spec,
   not asserted only for login.)
+
+  **Done 2026-08-19.** New file `tests/Functional/CsrfProtectionTest.php`,
+  10 tests (5 routes x stripped/altered, exactly as specified), all
+  investigated per route rather than assumed uniform, per this task's own
+  instruction.
+
+  **A finding that shapes the whole file, found by reading
+  `SameOriginCsrfTokenManager::isTokenValid()` directly rather than assumed
+  from Tasks 17/23's login-only findings: "altered to an invalid value" only
+  actually gets refused if the forged value is short.** All five routes'
+  CSRF ids (`authenticate`, `logout`, `submit`) are decorated by the same
+  `Symfony\Component\Security\Csrf\SameOriginCsrfTokenManager`. Its very
+  first check is `strlen($token->getValue()) < TOKEN_MIN_LENGTH (24) &&
+  $token->getValue() !== $cookieName` — true, it rejects immediately,
+  *before* the Origin/Referer check ever runs. A *long* forged value (>= 24
+  chars, matching no real double-submit cookie) skips that gate and then
+  genuinely **passes** `isValidOrigin()` on this project's own
+  GET-then-POST test flow, because BrowserKit sets `Referer` from history
+  automatically (Task 2's note) and `SameOriginCsrfTokenManager` does not
+  otherwise care what the token's value *is*, only whether the request is
+  verifiably same-origin — correct behavior for the stateless scheme, but it
+  means a forged-but-long value would have been silently **accepted**, not
+  refused, making that half of the sweep pass for the wrong reason (or not
+  fail at all) had a long value been chosen. `ALTERED_CSRF_TOKEN` is
+  therefore the short literal `'not-a-real-csrf-token'` (21 chars),
+  confirmed against the installed source before relying on it, not copied
+  from any earlier task's login-specific finding.
+
+  **Per-route rejection shape, empirically confirmed to be genuinely
+  different across all three mechanisms, not one uniform behavior:**
+  - **`/login` — 303 redirect to `/login`, the one uniform
+    `UniformAuthenticationFailureHandler` flash message, no authenticated
+    token.** CSRF here is a `CsrfTokenBadge` checked by
+    `CsrfProtectionListener::checkPassport()`, which throws
+    `InvalidCsrfTokenException` — an `AuthenticationException` — indistinguishable
+    from a wrong password once it reaches Task 16's handler. Side note, not
+    asserted (out of this task's scope, already Task 23's): `LoginThrottlingListener`
+    (`CheckPassportEvent` priority 2080) runs *before* `CsrfProtectionListener`
+    (priority 512), confirmed in both classes, so a CSRF-rejected login
+    attempt still consumes one `login_account`/`login_source` token exactly
+    like any other failed attempt.
+  - **`/logout` — plain 403, existing session untouched.** `LogoutListener::authenticate()`
+    throws `LogoutException` (*not* an `AuthenticationException`) on a bad
+    token, and `Firewall\ExceptionListener::handleLogoutException()` wraps
+    that as `AccessDeniedHttpException`. Confirmed by reading both classes:
+    the throw happens *before* `LogoutEvent` is ever dispatched or
+    `$tokenStorage->setToken(null)` is ever called, so the pre-existing
+    session is never touched at all, not merely "restored" — proven by a
+    subsequent request to the dashboard still rendering as the same
+    signed-in user.
+  - **`/reset-password`, `/reset-password/reset/{token}`, `/verify-email/resend`
+    — 422, form re-render with a root-level CSRF error, service never
+    called.** Ordinary Symfony Forms; `CsrfValidationListener::preSubmit()`
+    adds a *form-level* `FormError` (rendered by `_error_summary.html.twig`
+    as the plain, unanchored list item Task 38's accessibility pass already
+    found this exact shape for) and never touches the controller. All three
+    controllers only call their service inside `if ($form->isSubmitted() &&
+    $form->isValid())` — confirmed by re-reading all three, not inferred —
+    so a CSRF-rejected submission never reaches `PasswordResetService`/
+    `EmailVerificationService` at all, and `AbstractController::doRender()`'s
+    own submitted-and-invalid rule sets the response to 422 automatically
+    (the same mechanism Task 27 already documented for a blank-email
+    submission).
+
+  **Side-effect proof per route, each concrete rather than inferred from
+  the status code alone:** `/login` — a subsequent request to `/` is still
+  anonymous. `/logout` — a subsequent request to `/player` still renders as
+  the signed-in user. `/reset-password` — no email dispatched
+  (`RecordingEmailMessageHandler`), and (stripped case) zero
+  `reset_password_request` rows for the account, or (altered case, starting
+  from an already-outstanding token) the exact same row/selector still
+  present *and* still genuinely completable afterward — the stronger half
+  of the task's "or" clause, not just "still in the table". `/reset-password/reset/{token}`
+  — the stored password hash is byte-identical after `$em->clear()` +
+  refetch, and the same token still completes a real reset afterward,
+  proving it was never consumed. `/verify-email/resend` — no email
+  dispatched, and (stripped case) zero `email_verification_token` rows, or
+  (altered case, from a pre-existing token) the same selector untouched and
+  the token still genuinely verifies the account afterward.
+
+  **Test-isolation notes, consistent with Tasks 17/19/23/28/32/34's
+  established pattern, not new discoveries:** `persist()` commits the
+  fixture user immediately and reopens a transaction, because
+  `AuthEventRecorder` writes through its own, genuinely separate physical
+  connection (Task 34) whenever a real sign-in/sign-out fires — which
+  happens here either way for the login tests (`LOGIN_FAILED` fires even on
+  a CSRF-rejected attempt, since `AuthEventSubscriber::onLoginFailure()`
+  does not distinguish the cause) and for the logout tests' precondition
+  sign-in (`LOGIN_SUCCEEDED`); `tearDown()` deletes `auth_event` then
+  `app_user` by email, and `ON DELETE CASCADE` on both token tables' `user_id`
+  FK cleans up any `reset_password_request`/`email_verification_token` row a
+  successful proof-of-validity step left committed. The reset-password and
+  verify-email-resend CSRF-rejection requests themselves never touch the
+  rate limiter (the controller's service call — the only thing that
+  consumes `password_reset_account`/`password_reset_source` — sits inside
+  the same `if ($form->isValid())` guard the CSRF check trips), so this file
+  has no interaction with Tasks 22/23/33's array-cache-reset findings beyond
+  what is already documented there.
+
+  **Verify, exactly as specified:** `docker compose exec -T -e APP_ENV=test
+  php php bin/phpunit tests/Functional/CsrfProtectionTest.php` — **10
+  tests, 54 assertions, green**, stable across three repeated runs.
+  `lint:container` — OK. `lint:yaml config` — OK (19 files).
+  `doctrine:schema:validate --skip-sync` — mapping OK. Full suite run twice
+  back to back: **149 tests, 530 assertions, green both times** (up from
+  139 before this task — this task's 10 tests are the only addition,
+  confirming no regression from Tasks 1-38). `tests/Functional/` alone
+  (70/70) and the new file alone (10/10), immediately after the two full
+  runs — no leakage observed in any combination.
+
+  **This is the final task in the 39-task plan. Every task (1-39) is now
+  checked off; the Coverage table below already lists AC-21 as claimed by
+  Tasks 2, 12, and this one.**
 
 ---
 
@@ -1789,3 +3528,234 @@ available (Task 3), the CSRF token value being the cookie name and origin
 validation being Referer-dependent in tests (Tasks 12, 17, 19, 23, 28, 31, 32,
 33, 37, 39), and `auto_setup=0` requiring a migrated `messenger_messages`
 table (Tasks 9, 29).
+
+---
+
+## Accessibility verification notes (Task 38)
+
+*Verified 2026-08-19. No browser-automation tooling (Playwright/Chrome
+MCP/Axe/Lighthouse) is wired into this environment — confirmed by searching
+the available tool set before starting. This is therefore a code-based pass,
+not a live-browser pass: the app was started via `docker compose` (already
+running — `nginx` on `http://localhost:8080`, `php`, `database`, `mailer`),
+and every screen's **actual rendered HTML** was captured with `curl` (GET for
+the initial state, POST with a matching `Origin` header for the
+stateless-CSRF-valid invalid-submission states — see the "CSRF:
+`enable_csrf`" note above, which this pass independently reproduced: a bare
+POST with no `Origin`/`Referer` is rejected as CSRF-invalid, exactly as
+documented). Rendered files live under
+`/tmp/claude-1000/-home-user-ai-training-symfony/ce704a06-c108-4dcf-9699-5e915c52a7ce/scratchpad/`
+(`login.html`, `login_after.html` (failed sign-in), `reset_request.html`,
+`reset_request_invalid.html`, `reset_reset_invalid.html` (form state),
+`reset_change_invalid.html` (validation-error state), `reset_change_refused.html`
+(refused/invalid-token state), `reset_request_csrf_fail.html` (root-level CSRF
+error, no anchor), `verify_resend.html`, `verify_resend_invalid.html`,
+`verify_resend_submitted.html`, `verify_result_invalid.html`). Contrast ratios
+were computed independently (not copied from Task 37) with a small script,
+`contrast.py`, implementing the WCAG relative-luminance formula from scratch;
+its full output and worked arithmetic are reproduced below. No DOM tabindex
+attribute exists anywhere in `templates/` (`grep -rn tabindex templates/`
+returns nothing), so for every screen below, tab order = DOM order and no
+positive-tabindex hack needs separate checking.
+
+**Overall result: PASS on all four checks for all three named screens. No
+defects found; no code changes made.**
+
+### Independently computed contrast ratios (WCAG relative-luminance formula)
+
+Worked arithmetic, body text `#1a1a1a` on `#ffffff`:
+
+```
+R=G=B=0x1a=26 -> srgb = 26/255 = 0.101961 -> linear = ((0.101961+0.055)/1.055)^2.4 = 0.010330
+L(#1a1a1a) = 0.2126*0.010330 + 0.7152*0.010330 + 0.0722*0.010330 = 0.010330
+L(#ffffff) = 1.000000
+contrast   = (1.000000+0.05)/(0.010330+0.05) = 1.05/0.06033 = 17.40:1
+```
+
+Worked arithmetic, focus outline `#0b5fae` on `#ffffff`:
+
+```
+R=0x0b=11  -> srgb=0.043137 -> linear=0.003347
+G=0x5f=95  -> srgb=0.372549 -> linear=0.114435
+B=0xae=174 -> srgb=0.682353 -> linear=0.423268
+L(#0b5fae) = 0.2126*0.003347 + 0.7152*0.114435 + 0.0722*0.423268 = 0.113116
+contrast   = (1.000000+0.05)/(0.113116+0.05) = 1.05/0.163116 = 6.44:1
+```
+
+Full script output (every colour pair actually used in `public/css/app.css`),
+all independently agreeing with Task 37's stated numbers to 2 decimal places
+(nothing here was copied from that task's notes — same formula, re-derived):
+
+| Pair | Ratio | Floor | Result |
+|---|---|---|---|
+| body text `#1a1a1a` on `#ffffff` | **17.40:1** | 4.5:1 | PASS |
+| muted text `#4b4b4b` on `#ffffff` | **8.72:1** | 4.5:1 | PASS |
+| link/button/focus `#0b5fae` on `#ffffff` | **6.44:1** | 4.5:1 | PASS |
+| button text `#ffffff` on fill `#0b5fae` | **6.44:1** | 4.5:1 | PASS |
+| inline field-error `#b3261e` on `#ffffff` | **6.54:1** | 4.5:1 | PASS |
+| error-summary text `#601410` on box `#fdecea` | **11.44:1** | 4.5:1 | PASS |
+| status-box text `#1a1a1a` on `#eaf2fb` | **15.41:1** | 4.5:1 | PASS |
+| control border `#6b6b6b` on `#ffffff` | **5.33:1** | 3:1 | PASS |
+| focus outline `#0b5fae` vs page bg `#ffffff` | **6.44:1** | 3:1 | PASS |
+| focus outline `#0b5fae` vs error-summary bg `#fdecea` | **5.63:1** | 3:1 | PASS |
+| focus outline `#0b5fae` vs status bg `#eaf2fb` | **5.70:1** | 3:1 | PASS |
+
+Cross-referenced against the actual rendered HTML: every input in the five
+templates is `type="email"`, `type="password"`, or `type="text"`, so the
+`input[type="email"], input[type="password"], input[type="text"] { min-height:
+44px }` rule in `app.css` applies to every field observed; every submit
+control is a bare `<button>`, so `button, .button { min-height/min-width:
+44px }` applies without a class needing to be added; every invalid field in
+the four captured invalid-submission renders carries the literal
+`aria-invalid="true"` attribute the `input[aria-invalid="true"]` border rule
+selects on; `.error-summary`/`.error-summary__title`/`.field-errors` classes
+in `app.css` match the literal classes emitted by
+`templates/form/_error_summary.html.twig` and `templates/form/theme.html.twig`
+in the rendered output byte-for-byte.
+
+### Screen 1 — Sign-in (`/login`)
+
+- **(a) Keyboard walkthrough — PASS.** DOM/tab order confirmed from
+  `login.html` and `login_after.html`: skip-link → (on failure only) the
+  `role="alert"` paragraph's `<a href="#username">` → email input (has
+  `autofocus`) → password input → submit button (`Sign in`) → "Forgot your
+  password?" link. No positive tabindex, no element skipped, Enter on either
+  input submits the native form. Reaches every control; no trap.
+- **(b) Screen-reader spot-check — PASS, code-based (no live AT available in
+  this environment; reasoned from the actual rendered ARIA wiring instead of
+  a live NVDA/JAWS/VoiceOver session — noting explicitly that none was run).**
+  A failed sign-in (`curl -X POST /login` with wrong credentials, confirmed
+  live) renders `<p role="alert" id="login-error"><a href="#username">Invalid
+  email or password.</a></p>` and both inputs gain
+  `aria-invalid="true" aria-describedby="login-error"`. Two independent
+  exposure paths exist: (1) `role="alert"` marks the region as an assertive
+  live region for any AT user who reaches it; (2) regardless of whether a
+  given browser/AT combination auto-announces an alert region that was
+  already present at initial parse (a known cross-AT inconsistency for
+  full-page reloads, as opposed to an AJAX-inserted alert — not a defect in
+  this codebase), the `aria-describedby` link guarantees that the moment
+  focus lands on either input (which happens immediately here, since
+  `username` carries `autofocus`), the screen reader reads the field plus its
+  described error text. This is a reliable mechanism independent of live-
+  region announcement timing.
+- **(c) Contrast — PASS.** Body text, link colour, and focus outline are the
+  shared tokens verified above (17.40:1, 6.44:1, 6.44:1 respectively); this
+  screen introduces no screen-specific colours.
+- **(d) 320px viewport / 44×44 targets — PASS.** `main.page` is
+  `max-width: 30rem` with `1.5rem 1rem` padding — at a 320px viewport the
+  content column is `320 - 2*16 = 288px`, comfortably under 320px with no
+  horizontal-scroll risk (no fixed-pixel widths anywhere in `app.css` wider
+  than that; every width is `100%`/`auto`). Both inputs get `min-height:
+  44px`; the submit button gets `min-height`/`min-width: 44px`; the
+  "Forgot your password?" link is in `.link-list a`, which sets
+  `min-height: 44px` (its rendered text is far wider than 44px, so width is
+  not a constraint here).
+
+### Screen 2 — Password reset (`/reset-password`, `/reset-password/reset/{token}`)
+
+- **(a) Keyboard walkthrough — PASS**, confirmed on all three states actually
+  rendered:
+  - *Request form* (`reset_request.html` / `reset_request_invalid.html`):
+    skip-link → (if invalid) error-summary anchor(s), e.g.
+    `<a href="#reset_password_request_form_email">` → email input → submit
+    button. No link-list on this state.
+  - *Completion form* (`reset_reset_invalid.html` is the form state served
+    for an unrecognized-at-GET-time token; `reset_change_invalid.html` is the
+    same form after a password-mismatch POST): skip-link → (if invalid)
+    error-summary anchor → `plainPassword_first` input → `plainPassword_second`
+    input → submit button (`Reset password`).
+  - *Refused state* (`reset_change_refused.html`, produced by POSTing a
+    well-formed-but-unresolvable token): skip-link → single `role="alert"`
+    paragraph (plain text, not a link — see below) → one link-list entry,
+    "Request a new reset link". No control is skipped in any state.
+- **(b) Screen-reader spot-check — PASS, code-based, same caveat as Screen 1
+  (no live AT session run).** Two error shapes were captured live: a
+  field-level error (`reset_request_invalid.html`, invalid email) renders the
+  error-summary `<li><a href="#reset_password_request_form_email">Email: This
+  value is not a valid email address.</a></li>` and the field itself gets
+  `aria-invalid="true" aria-describedby=
+  "reset_password_request_form_email_error1"` — the id referenced by
+  `aria-describedby` matches the `id` on the `<li>` that actually carries the
+  message, confirmed byte-for-byte in the fetched HTML (not assumed from the
+  template source). A **root-level (non-field) CSRF error** was also
+  independently reproduced (POST with no `Origin`/`Referer` header and a
+  syntactically-invalid token): the error-summary renders `<li>The CSRF token
+  is invalid. Please try to resubmit the form.</li>` as **plain text with no
+  anchor and no field marked invalid** — exactly matching Task 37's claim,
+  now independently reproduced rather than trusted. The change-password
+  form's mismatch error is correctly anchored to the **first** repeated-field
+  child (`change_password_form_plainPassword_first`), matching the documented
+  `RepeatedType`-maps-errors-to-first-child behaviour, confirmed in the live
+  `reset_change_invalid.html` capture. The refused-token state's
+  `role="alert"` paragraph carries the entire message as its only content, so
+  a screen reader reaching it reads the whole reason text.
+- **(c) Contrast — PASS.** Same shared tokens (body text 17.40:1, focus
+  outline 6.44:1 vs `#ffffff`); the error-summary box additionally uses
+  `#601410` on `#fdecea` (11.44:1) and the focus ring on links/inputs inside
+  that box was independently computed at 5.63:1 against `#fdecea` — both
+  clear their respective floors.
+- **(d) 320px viewport / 44×44 targets — PASS.** Same `main.page` sizing
+  argument as Screen 1. Both password inputs and the email input get
+  `min-height: 44px`; both submit buttons get `min-height`/`min-width: 44px`;
+  the refused-state's single recovery link is in `.link-list a` (`min-height:
+  44px`, wide text).
+
+### Screen 3 — Email verification (`/verify-email/resend`, `/verify-email/{token}`)
+
+- **(a) Keyboard walkthrough — PASS**, confirmed on all captured states:
+  - *Resend form* (`verify_resend.html` / `verify_resend_invalid.html`):
+    skip-link → (if invalid) error-summary anchor → email input → submit
+    button (`Send verification link`).
+  - *Resend submitted* (`verify_resend_submitted.html`): skip-link → one
+    `role="status"` paragraph, no further controls (a deliberate dead-end
+    confirmation, mirroring the reset-password `check_email` screen read
+    directly from `templates/reset_password/check_email.html.twig`).
+  - *Result screen* (`verify_result_invalid.html` captured live for the
+    `invalid` branch; the `success`/`expired`/`already_consumed` branches were
+    confirmed structurally identical by reading
+    `templates/verify_email/result.html.twig` directly — same single
+    `h1`/`role="alert"`-or-`role="status"` paragraph/one-item `link-list`
+    shape in every branch, just different text and link target, so the tab
+    order established for the live `invalid` capture — skip-link → paragraph
+    (not focusable) → one link — holds for all four branches without needing
+    seed data to force each token state).
+- **(b) Screen-reader spot-check — PASS, code-based, same caveat as Screens 1
+  and 2.** `verify_resend_invalid.html` (invalid email) shows the identical
+  error-summary/`aria-describedby` pattern already verified for the
+  reset-password request form —
+  `aria-describedby="resend_verification_form_email_error1"` matches the
+  `<li id="resend_verification_form_email_error1">` that holds the message,
+  confirmed in the live capture. The result screen's `role="alert"` (invalid/
+  expired/already-consumed) or `role="status"` (success) paragraph contains
+  the entire user-facing message as its only text content, so it is fully
+  exposed to any AT user who reaches it regardless of live-region timing.
+- **(c) Contrast — PASS.** Same shared tokens; the status-message box
+  (`role="status"`, seen live in `verify_resend_submitted.html`) uses
+  `#1a1a1a` on `#eaf2fb` (15.41:1, independently computed above).
+- **(d) 320px viewport / 44×44 targets — PASS.** Same `main.page` sizing
+  argument. Email input and submit button meet the 44px rules as above; the
+  result screen's single link-list entry meets `.link-list a`'s 44px
+  min-height.
+
+### Findings
+
+No accessibility defect was found. One structural observation, not a defect:
+the login failure message (`templates/security/login.html.twig`) renders as a
+bare `<p role="alert" id="login-error">` with no `.alert-message`/
+`.status-message` styling class, unlike every other screen's error/status
+box — this is intentional per Task 37's note (the exact-trimmed-text
+assertion in `SignInTest::testTheFourFailureCausesAreIndistinguishable`
+constrains this paragraph's content), and it does not affect contrast (the
+paragraph inherits body text colour, and its link inherits the link colour
+already verified at 6.44:1) or keyboard/AT exposure. Recorded here as a
+finding, not silently patched, since it is a deliberate design/test
+constraint rather than an oversight.
+
+### Verify
+
+Four checks (a/b/c/d), each with a concrete pass/fail and number rather than
+a bare checkmark, recorded above for all three named screens (sign-in;
+password reset request + completion; email verification resend + result).
+No code changes were made during this pass, so the full suite was not
+re-run — it remains at Task 37's end state (139 tests, 476 assertions,
+green).

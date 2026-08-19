@@ -1,0 +1,37 @@
+{# `App\MessageHandler\SendEmailMessageHandler` (Task 29) renders this file
+   two ways from the SAME source: the whole file (with the guard below
+   skipped) becomes the HTML body via `TemplatedEmail::htmlTemplate()`, and
+   `subject`/`text` are pulled out individually via `renderBlock()` for the
+   subject line and the plain-text alternative. See that class's docblock for
+   why a single `{% if false %}` guard, not two separate files, holds all
+   three -- a plain `render()` would otherwise duplicate the subject/text
+   content into the HTML body, since an unguarded top-level `{% block %}`
+   always prints in place on a template with no `{% extends %}`.
+
+   Context: `verificationUrl` (an absolute URL to `app_verify_email`,
+   built by the handler from the message's raw `token`). #}
+{% if false %}
+    {% block subject %}Verify your email address{% endblock %}
+    {% block text %}
+Hello,
+
+Thanks for signing up. Please verify your email address by opening the link below:
+
+{{ verificationUrl }}
+
+This link expires in 24 hours. If you did not request this, you can safely ignore this email.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello,</p>
+        <p>Thanks for signing up. Please verify your email address by clicking the link below:</p>
+        <p><a href="{{ verificationUrl }}">Verify your email address</a></p>
+        <p>This link expires in 24 hours. If you did not request this, you can safely ignore this email.</p>
+    </body>
+</html>

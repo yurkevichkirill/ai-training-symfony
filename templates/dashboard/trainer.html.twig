@@ -2,14 +2,15 @@
 
 {% block title %}Trainer dashboard{% endblock %}
 
-{% block body %}
-    <main>
-        <h1>Trainer dashboard</h1>
-        <p>Signed in as {{ app.user.email }}.</p>
+{% block h1 %}Trainer dashboard{% endblock %}
 
-        <form method="post" action="{{ path('app_logout') }}">
-            <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+{% block body %}
+    <p class="meta">Signed in as {{ app.user.email }}.</p>
+
+    <form method="post" action="{{ path('app_logout') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
+        <div class="actions">
             <button type="submit">Sign out</button>
-        </form>
-    </main>
+        </div>
+    </form>
 {% endblock %}

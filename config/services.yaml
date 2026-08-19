@@ -13,6 +13,12 @@ parameters:
     # gc_maxlifetime, which is only an opportunistic backstop (AC-7).
     app.session_idle_seconds: 28800
 
+    # The From address `App\MessageHandler\SendEmailMessageHandler` (Task 29)
+    # puts on every mail it sends. A plain parameter, not an env var: it is
+    # not secret and not infrastructure-specific the way MAILER_DSN is, so it
+    # needs no `.env` entry.
+    app.mailer_from_address: 'no-reply@example.com'
+
 services:
     # default configuration for services in *this* file
     _defaults:
@@ -26,3 +32,85 @@ services:
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+
+    # Both arguments are RateLimiterFactory, so autowiring by type cannot
+    # tell them apart -- bind each explicitly to the named limiter service
+    # rate_limiter.yaml declares (`limiter.<name>`, per the framework.
+    # rate_limiter tree). See the class docblock for why the key material
+    # each limiter uses is what it is (AC-19).
+    App\Security\LoginRateLimiter:
+        arguments:
+            $loginAccountLimiter: '@limiter.login_account'
+            $loginSourceLimiter: '@limiter.login_source'
+            $appSecret: '%kernel.secret%'
+
+    # Same "two RateLimiterFactory arguments" ambiguity as LoginRateLimiter
+    # above -- bind each explicitly to the shared password_reset_* limiters
+    # (config/packages/rate_limiter.yaml) that AC-20 reuses for verification
+    # resend (Task 22/26).
+    App\Service\EmailVerificationService:
+        arguments:
+            $passwordResetAccountLimiter: '@limiter.password_reset_account'
+            $passwordResetSourceLimiter: '@limiter.password_reset_source'
+
+    # Same shared password_reset_* pair, same "two RateLimiterFactory
+    # arguments" ambiguity, this time for the flow that pair was originally
+    # declared for (Task 22/30).
+    App\Service\PasswordResetService:
+        arguments:
+            $passwordResetAccountLimiter: '@limiter.password_reset_account'
+            $passwordResetSourceLimiter: '@limiter.password_reset_source'
+
+    # `$mailerFromAddress` is a plain string constructor argument -- autowiring
+    # cannot infer it from the type, so bind it explicitly to the parameter
+    # above.
+    App\MessageHandler\SendEmailMessageHandler:
+        arguments:
+            $mailerFromAddress: '%app.mailer_from_address%'
+
+when@test:
+    services:
+        # Task 28's stand-in for Task 29's real SendEmailMessageHandler,
+        # which now exists (src/MessageHandler/SendEmailMessageHandler.php)
+        # but must not ALSO handle SendEmailMessage here. Once a message
+        # class has an `async` routing entry (config/packages/messenger.yaml,
+        # under when@dev/when@prod only -- deliberately absent here and at
+        # the base level), Messenger sends it to that transport instead of
+        # handling it locally; leaving this message with NO routing entry in
+        # test keeps it on the default bus, handled locally, by whichever
+        # handler is tagged in this environment. This stub remains the only
+        # one tagged here (see the override just below), so
+        # EmailVerificationFlowTest's `RecordingEmailMessageHandler->last()`
+        # keeps working synchronously, with no worker and no real mail
+        # attempt, exactly as it did before this task.
+        App\Tests\Support\RecordingEmailMessageHandler:
+            public: true
+            tags:
+                - { name: messenger.message_handler, handles: App\Message\SendEmailMessage }
+
+        # The real handler still exists as an ordinary service in test (so
+        # anything that autowires it directly still works), but
+        # `autoconfigure: false` here overrides its base definition's
+        # `#[AsMessageHandler]`-driven `messenger.message_handler` tag for
+        # THIS environment only -- confirmed empirically with
+        # `debug:messenger --env=test` showing no handler for
+        # SendEmailMessage besides the recorder above (Task 29's plan note
+        # has the full three-environment comparison). Without this override,
+        # test would register BOTH handlers on the same untouched (no
+        # routing entry) sync path, and Messenger's real, documented support
+        # for multiple handlers per message would run this class too on
+        # every `resend()` call -- harmless given MAILER_DSN=null://null, but
+        # an unnecessary Twig render/URL generation on every test and not
+        # what "test env only has the recording handler" (this task's own
+        # brief) asks for. `autowire: true` is repeated explicitly here
+        # (redundant with `_defaults` for the base definition, but this
+        # override is a fresh definition for the same id, and NOT repeating
+        # it here was confirmed, via `debug:container --env=test`, to leave
+        # this service with 3 of its 4 constructor arguments unresolved --
+        # harmless today only because the container prunes this now-unused,
+        # untagged service entirely in test, but wrong to leave latent).
+        App\MessageHandler\SendEmailMessageHandler:
+            autowire: true
+            autoconfigure: false
+            arguments:
+                $mailerFromAddress: '%app.mailer_from_address%'

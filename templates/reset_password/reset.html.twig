@@ -1,0 +1,28 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}{% if state == 'refused' %}Reset link invalid{% else %}Choose a new password{% endif %}{% endblock %}
+
+{% block h1 %}{% if state == 'refused' %}Reset link invalid{% else %}Choose a new password{% endif %}{% endblock %}
+
+{% block body %}
+    {% if state == 'refused' %}
+        <p role="alert" class="alert-message">{{ reason }}</p>
+        <ul class="link-list">
+            <li><a href="{{ path('app_forgot_password_request') }}">Request a new reset link</a></li>
+        </ul>
+    {% else %}
+        {{ form_start(form) }}
+            {{ error_summary.summary(form) }}
+            {{ form_row(form.plainPassword.first, {
+                attr: {autocomplete: 'new-password'},
+            }) }}
+            {{ form_row(form.plainPassword.second, {
+                attr: {autocomplete: 'new-password'},
+            }) }}
+            <div class="actions">
+                <button type="submit">Reset password</button>
+            </div>
+        {{ form_end(form) }}
+    {% endif %}
+{% endblock %}
