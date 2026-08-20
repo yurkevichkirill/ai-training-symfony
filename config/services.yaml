@@ -19,6 +19,11 @@ parameters:
     # needs no `.env` entry.
     app.mailer_from_address: 'no-reply@example.com'
 
+    # Deliberately outside public/ (AC-12): FileStorage's stored files are
+    # never directly reachable by nginx/the front controller -- only via
+    # PhotoController's authorized read path.
+    app.uploads_dir: '%kernel.project_dir%/var/uploads'
+
 services:
     # default configuration for services in *this* file
     _defaults:
@@ -67,6 +72,10 @@ services:
     App\MessageHandler\SendEmailMessageHandler:
         arguments:
             $mailerFromAddress: '%app.mailer_from_address%'
+
+    App\Service\FileStorage:
+        arguments:
+            $uploadsDir: '%app.uploads_dir%'
 
 when@test:
     services:

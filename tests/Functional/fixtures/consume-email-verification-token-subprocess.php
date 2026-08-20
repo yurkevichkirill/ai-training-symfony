@@ -48,6 +48,7 @@ declare(strict_types=1);
 use App\Entity\EmailVerificationToken;
 use App\Kernel;
 use App\Service\EmailVerificationTokenService;
+use App\Service\SelectorVerifierTokenFactory;
 use Symfony\Component\Dotenv\Dotenv;
 
 $projectDir = \dirname(__DIR__, 3);
@@ -72,7 +73,7 @@ $doctrine = $container->get('doctrine');
 $doctrine->getConnection()->executeQuery('SELECT 1');
 
 $tokenRepository = $doctrine->getRepository(EmailVerificationToken::class);
-$service = new EmailVerificationTokenService($doctrine, $tokenRepository);
+$service = new EmailVerificationTokenService($doctrine, $tokenRepository, new SelectorVerifierTokenFactory());
 
 [, $token, $readyFile, $resultFile] = $argv;
 

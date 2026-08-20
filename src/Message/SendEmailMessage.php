@@ -51,6 +51,13 @@ final class SendEmailMessage
      */
     public const TEMPLATE_RESET_PASSWORD = 'reset_password';
 
+    /**
+     * Consumed by `SendEmailMessageHandler` to select
+     * `templates/emails/trainer_invitation.html.twig` (S2, AC-5). Dispatched
+     * by `TrainerOnboardingService::createTrainer()`.
+     */
+    public const TEMPLATE_TRAINER_INVITATION = 'trainer_invitation';
+
     public function __construct(
         public readonly string $to,
         public readonly string $template,

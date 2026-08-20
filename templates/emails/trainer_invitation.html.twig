@@ -1,0 +1,31 @@
+{# `App\MessageHandler\SendEmailMessageHandler` renders this file the same
+   three ways verify_email.html.twig documents. Context: `invitationUrl` (an
+   absolute URL to `app_account_invitation`, built by the handler from the
+   message's raw `token`). #}
+{% if false %}
+    {% block subject %}You've been invited to set up your trainer account{% endblock %}
+    {% block text %}
+Hello,
+
+A Super Admin has created a trainer account for you on the platform. Set your
+password to activate it by opening the link below:
+
+{{ invitationUrl }}
+
+This link expires in 7 days. If you were not expecting this invitation, you
+can safely ignore this email.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello,</p>
+        <p>A Super Admin has created a trainer account for you on the platform. Set your password to activate it by clicking the link below:</p>
+        <p><a href="{{ invitationUrl }}">Set your password</a></p>
+        <p>This link expires in 7 days. If you were not expecting this invitation, you can safely ignore this email.</p>
+    </body>
+</html>

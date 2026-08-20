@@ -1,0 +1,84 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Users{% endblock %}
+{% block h1 %}Users{% endblock %}
+
+{% block body %}
+    <p><a href="{{ path('admin_users_create') }}">+ Create trainer</a></p>
+
+    <form method="get" action="{{ path('admin_users_index') }}">
+        <label for="q">Search (name or email)</label>
+        <input type="text" id="q" name="q" value="{{ criteria.query }}">
+
+        <label for="role">Role</label>
+        <select id="role" name="role">
+            <option value="">Any</option>
+            {% for role in roles %}
+                <option value="{{ role.value }}" {{ criteria.role == role ? 'selected' : '' }}>{{ role.value }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="status">Status</label>
+        <select id="status" name="status">
+            <option value="">Any</option>
+            {% for status in statuses %}
+                <option value="{{ status.value }}" {{ criteria.status == status ? 'selected' : '' }}>{{ status.value }}</option>
+            {% endfor %}
+        </select>
+
+        <button type="submit">Filter</button>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in page.items %}
+                <tr>
+                    <td>{{ user.displayName }}</td>
+                    <td>{{ user.email }}</td>
+                    <td>{{ user.role.value }}</td>
+                    <td>{{ user.status.value }}</td>
+                    <td>{{ user.createdAt|date('Y-m-d') }}</td>
+                    <td>
+                        {% if user.status.value != 'DELETED' %}
+                            <a href="{{ path('admin_users_edit', {id: user.id}) }}">Edit</a>
+                        {% endif %}
+                        {% if user.status.value == 'ACTIVE' %}
+                            <form method="post" action="{{ path('admin_users_deactivate', {id: user.id}) }}" style="display:inline">
+                                <input type="hidden" name="_token" value="{{ csrf_token('admin_deactivate_' ~ user.id) }}">
+                                <button type="submit">Deactivate</button>
+                            </form>
+                        {% elseif user.status.value == 'DEACTIVATED' %}
+                            <form method="post" action="{{ path('admin_users_reactivate', {id: user.id}) }}" style="display:inline">
+                                <input type="hidden" name="_token" value="{{ csrf_token('admin_reactivate_' ~ user.id) }}">
+                                <button type="submit">Reactivate</button>
+                            </form>
+                        {% endif %}
+                        {% if user.status.value != 'DELETED' %}
+                            <a href="{{ path('admin_users_delete', {id: user.id}) }}">Delete</a>
+                        {% endif %}
+                    </td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.hasMore() %}
+        <a href="{{ path('admin_users_index', {
+            q: criteria.query,
+            role: criteria.role ? criteria.role.value : null,
+            status: criteria.status ? criteria.status.value : null,
+            after_created_at: page.nextAfterCreatedAt|date('c'),
+            after_id: page.nextAfterId,
+        }) }}">Next page</a>
+    {% endif %}
+{% endblock %}

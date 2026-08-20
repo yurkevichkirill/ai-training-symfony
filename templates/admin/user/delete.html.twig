@@ -1,0 +1,21 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Delete user{% endblock %}
+{% block h1 %}Delete {{ target.displayName }}{% endblock %}
+
+{% block body %}
+    <p role="alert" class="alert-message">
+        Personal information will be removed. Historical records will show
+        "Deleted User". This cannot be undone. Continue?
+    </p>
+
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {{ form_row(form.reason, {label: 'Reason (optional)'}) }}
+        <div class="actions">
+            <button type="submit">Delete permanently</button>
+            <a href="{{ path('admin_users_index') }}">Cancel</a>
+        </div>
+    {{ form_end(form) }}
+{% endblock %}

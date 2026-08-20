@@ -75,6 +75,7 @@ security:
         - { path: ^/(login|logout)$, roles: PUBLIC_ACCESS }
         - { path: ^/reset-password, roles: PUBLIC_ACCESS }
         - { path: ^/verify-email, roles: PUBLIC_ACCESS }
+        - { path: ^/invitations, roles: PUBLIC_ACCESS }
         - { path: ^/(css|js|images)/, roles: PUBLIC_ACCESS }
         - { path: ^/favicon.ico, roles: PUBLIC_ACCESS }
         - { path: ^/, roles: ROLE_USER }

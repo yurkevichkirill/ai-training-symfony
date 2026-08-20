@@ -1,0 +1,48 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Profile{% endblock %}
+{% block h1 %}Profile{% endblock %}
+
+{% block body %}
+    <dl>
+        <dt>Email</dt>
+        <dd>{{ user.email }}</dd>
+        <dt>Role</dt>
+        <dd>{{ user.role.value }}</dd>
+        <dt>Account created</dt>
+        <dd>{{ user.createdAt|date('Y-m-d') }}</dd>
+    </dl>
+
+    <h2>Photo</h2>
+    <form method="post" action="{{ path('app_profile_photo_upload') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_token" value="{{ csrf_token('submit') }}">
+        <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required>
+        <button type="submit">Upload photo</button>
+    </form>
+
+    <h2>Your details</h2>
+    {{ form_start(commonForm) }}
+        {{ error_summary.summary(commonForm) }}
+        {{ form_row(commonForm.firstName) }}
+        {{ form_row(commonForm.lastName) }}
+        {{ form_row(commonForm.phone) }}
+        <div class="actions">
+            <button type="submit">Save</button>
+        </div>
+    {{ form_end(commonForm) }}
+
+    {% if trainerForm is not null %}
+        <h2>Business details</h2>
+        {{ form_start(trainerForm, {action: path('app_profile_edit_business')}) }}
+            {{ error_summary.summary(trainerForm) }}
+            {{ form_row(trainerForm.businessName) }}
+            {{ form_row(trainerForm.website) }}
+            {{ form_row(trainerForm.address) }}
+            {{ form_row(trainerForm.description) }}
+            <div class="actions">
+                <button type="submit">Save business details</button>
+            </div>
+        {{ form_end(trainerForm) }}
+    {% endif %}
+{% endblock %}

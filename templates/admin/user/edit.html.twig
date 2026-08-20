@@ -1,0 +1,26 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Edit user{% endblock %}
+{% block h1 %}Edit {{ target.displayName }}{% endblock %}
+
+{% block body %}
+    <dl>
+        <dt>Email</dt>
+        <dd>{{ target.email }}</dd>
+        <dt>Role</dt>
+        <dd>{{ target.role.value }}</dd>
+        <dt>Status</dt>
+        <dd>{{ target.status.value }}</dd>
+    </dl>
+
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {{ form_row(form.firstName) }}
+        {{ form_row(form.lastName) }}
+        {{ form_row(form.phone) }}
+        <div class="actions">
+            <button type="submit">Save</button>
+        </div>
+    {{ form_end(form) }}
+{% endblock %}

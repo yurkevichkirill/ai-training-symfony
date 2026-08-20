@@ -1,0 +1,19 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Create trainer{% endblock %}
+{% block h1 %}Create trainer{% endblock %}
+
+{% block body %}
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {{ form_row(form.businessName) }}
+        {{ form_row(form.firstName) }}
+        {{ form_row(form.lastName) }}
+        {{ form_row(form.email) }}
+        {{ form_row(form.phone) }}
+        <div class="actions">
+            <button type="submit">Create trainer</button>
+        </div>
+    {{ form_end(form) }}
+{% endblock %}

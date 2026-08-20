@@ -30,6 +30,7 @@ use Symfony\Component\Uid\UuidV7;
 #[ORM\Entity(repositoryClass: UserRepository::class)]
 #[ORM\Table(name: 'app_user')]
 #[ORM\UniqueConstraint(name: 'uniq_app_user_email', columns: ['email'])]
+#[ORM\Index(name: 'idx_app_user_status_role_created', columns: ['status', 'role', 'created_at'])]
 class User implements UserInterface, PasswordAuthenticatedUserInterface, EquatableInterface
 {
     #[ORM\Id]
@@ -56,6 +57,24 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
 
     #[ORM\Column(name: 'last_login_at', type: 'datetimetz_immutable', nullable: true)]
     private ?\DateTimeImmutable $lastLoginAt = null;
+
+    /**
+     * Common display fields (S2). Deliberately plain columns on User, not a
+     * Profile: they carry no capability and are not role-specific, so they
+     * are not the "capability data" the frozen Profile contract is for.
+     */
+    #[ORM\Column(name: 'first_name', type: 'string', length: 80, nullable: true)]
+    private ?string $firstName = null;
+
+    #[ORM\Column(name: 'last_name', type: 'string', length: 80, nullable: true)]
+    private ?string $lastName = null;
+
+    #[ORM\Column(type: 'string', length: 32, nullable: true)]
+    private ?string $phone = null;
+
+    /** Opaque FileStorage key -- never a filesystem path (AC-12). */
+    #[ORM\Column(name: 'photo_key', type: 'string', length: 255, nullable: true)]
+    private ?string $photoKey = null;
 
     #[ORM\Column(name: 'created_at', type: 'datetimetz_immutable')]
     private \DateTimeImmutable $createdAt;
@@ -209,6 +228,79 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface, Equatab
     public function touch(?\DateTimeImmutable $at = null): void
     {
         $this->updatedAt = $at ?? new \DateTimeImmutable();
+    }
+
+    public function getFirstName(): ?string
+    {
+        return $this->firstName;
+    }
+
+    public function getLastName(): ?string
+    {
+        return $this->lastName;
+    }
+
+    public function setName(?string $firstName, ?string $lastName): void
+    {
+        $this->firstName = $firstName;
+        $this->lastName = $lastName;
+    }
+
+    /**
+     * Falls back to the email's local part so a newly-invited trainer with no
+     * name yet still has something to display. A DELETED account always
+     * shows as "Deleted User" (AC-19): its email local part is only the
+     * anonymized placeholder by that point, never a real name.
+     */
+    public function getDisplayName(): string
+    {
+        if (UserStatus::DELETED === $this->status) {
+            return 'Deleted User';
+        }
+
+        $name = trim(($this->firstName ?? '').' '.($this->lastName ?? ''));
+
+        if ('' !== $name) {
+            return $name;
+        }
+
+        return strstr($this->email, '@', true) ?: $this->email;
+    }
+
+    public function getPhone(): ?string
+    {
+        return $this->phone;
+    }
+
+    public function setPhone(?string $phone): void
+    {
+        $this->phone = $phone;
+    }
+
+    public function getPhotoKey(): ?string
+    {
+        return $this->photoKey;
+    }
+
+    public function setPhotoKey(?string $photoKey): void
+    {
+        $this->photoKey = $photoKey;
+    }
+
+    /**
+     * GDPR erasure (AC-19, AC-22). The anonymized email is derived from this
+     * account's own immutable id, so it can never collide with another
+     * account's anonymized (or live) email.
+     */
+    public function anonymize(\DateTimeImmutable $at): void
+    {
+        $this->firstName = null;
+        $this->lastName = null;
+        $this->phone = null;
+        $this->photoKey = null;
+        $this->email = \sprintf('deleted_%s@example.com', $this->id);
+        $this->status = UserStatus::DELETED;
+        $this->touch($at);
     }
 
     public function eraseCredentials(): void

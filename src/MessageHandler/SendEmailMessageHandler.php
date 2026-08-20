@@ -63,6 +63,7 @@ final class SendEmailMessageHandler
     private const TEMPLATES = [
         SendEmailMessage::TEMPLATE_VERIFY_EMAIL => 'emails/verify_email.html.twig',
         SendEmailMessage::TEMPLATE_RESET_PASSWORD => 'emails/reset_password.html.twig',
+        SendEmailMessage::TEMPLATE_TRAINER_INVITATION => 'emails/trainer_invitation.html.twig',
     ];
 
     public function __construct(
@@ -124,6 +125,13 @@ final class SendEmailMessageHandler
             SendEmailMessage::TEMPLATE_RESET_PASSWORD => [
                 'resetUrl' => $this->urlGenerator->generate(
                     'app_reset_password',
+                    ['token' => $message->context['token']],
+                    UrlGeneratorInterface::ABSOLUTE_URL,
+                ),
+            ],
+            SendEmailMessage::TEMPLATE_TRAINER_INVITATION => [
+                'invitationUrl' => $this->urlGenerator->generate(
+                    'app_account_invitation',
                     ['token' => $message->context['token']],
                     UrlGeneratorInterface::ABSOLUTE_URL,
                 ),

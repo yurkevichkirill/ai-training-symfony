@@ -32,44 +32,28 @@ use Doctrine\Persistence\ManagerRegistry;
  */
 final class EmailVerificationTokenService
 {
-    /**
-     * `random_bytes(9)`, base64url-encoded, is always exactly 12 characters
-     * (9 is a multiple of 3, so base64 never pads it) -- not the 24 the
-     * architecture doc's shorthand suggests, which conflates the *column's*
-     * width (`varchar(24)`, generous headroom, see
-     * `EmailVerificationToken::$selector`) with the *value's* actual length.
-     * 12 fits comfortably inside that column. `consume()` splits on this
-     * exact constant, so it must stay in lock-step with `issue()`.
-     */
-    private const SELECTOR_LENGTH = 12;
-
-    private const SELECTOR_BYTES = 9;
-
-    private const VERIFIER_BYTES = 32;
-
     private const TTL = 'PT24H';
 
     public function __construct(
         private readonly ManagerRegistry $managerRegistry,
         private readonly EmailVerificationTokenRepository $tokenRepository,
+        private readonly SelectorVerifierTokenFactory $tokenFactory,
     ) {
     }
 
     /**
      * Invalidates every outstanding token for this user, then issues a fresh
      * one. Returns `selector.verifier` -- the raw string to embed in the
-     * verification link; only `hash('sha256', $verifier)` is ever persisted.
+     * verification link; only the hashed verifier is ever persisted.
      */
     public function issue(User $user): string
     {
         $entityManager = $this->openEntityManager();
-
-        $selector = self::encodeBase64Url(random_bytes(self::SELECTOR_BYTES));
-        $verifier = self::encodeBase64Url(random_bytes(self::VERIFIER_BYTES));
+        $pair = $this->tokenFactory->generate();
         $now = new \DateTimeImmutable();
         $expiresAt = $now->add(new \DateInterval(self::TTL));
 
-        $entityManager->wrapInTransaction(function () use ($entityManager, $user, $selector, $verifier, $expiresAt, $now): void {
+        $entityManager->wrapInTransaction(function () use ($entityManager, $user, $pair, $expiresAt, $now): void {
             // Must run first, in the same transaction as the insert below --
             // otherwise a request racing between the delete and the insert
             // could see two live tokens for the same user.
@@ -77,14 +61,14 @@ final class EmailVerificationTokenService
 
             $entityManager->persist(new EmailVerificationToken(
                 $user,
-                $selector,
-                hash('sha256', $verifier),
+                $pair->selector,
+                $pair->hashedVerifier,
                 $expiresAt,
                 $now,
             ));
         });
 
-        return $selector.$verifier;
+        return $pair->token;
     }
 
     /**
@@ -95,12 +79,13 @@ final class EmailVerificationTokenService
      */
     public function consume(string $token): User
     {
-        if (\strlen($token) <= self::SELECTOR_LENGTH) {
+        $parts = SelectorVerifierTokenFactory::split($token);
+
+        if (null === $parts) {
             throw new InvalidVerificationTokenException();
         }
 
-        $selector = substr($token, 0, self::SELECTOR_LENGTH);
-        $verifier = substr($token, self::SELECTOR_LENGTH);
+        [$selector, $verifier] = $parts;
 
         $entityManager = $this->openEntityManager();
 
@@ -157,7 +142,7 @@ final class EmailVerificationTokenService
             // consumption succeeds (AC-13, AC-14).
             $tokenEntity = $this->tokenRepository->findOneBySelectorForUpdate($selector);
 
-            if (null === $tokenEntity || !hash_equals($tokenEntity->getHashedVerifier(), hash('sha256', $verifier))) {
+            if (null === $tokenEntity || !hash_equals($tokenEntity->getHashedVerifier(), SelectorVerifierTokenFactory::hash($verifier))) {
                 throw new InvalidVerificationTokenException();
             }
 
@@ -177,11 +162,6 @@ final class EmailVerificationTokenService
 
             return $tokenEntity->getUser();
         });
-    }
-
-    private static function encodeBase64Url(string $binary): string
-    {
-        return rtrim(strtr(base64_encode($binary), '+/', '-_'), '=');
     }
 
     /**
