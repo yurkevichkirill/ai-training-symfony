@@ -64,6 +64,11 @@ final class SendEmailMessageHandler
         SendEmailMessage::TEMPLATE_VERIFY_EMAIL => 'emails/verify_email.html.twig',
         SendEmailMessage::TEMPLATE_RESET_PASSWORD => 'emails/reset_password.html.twig',
         SendEmailMessage::TEMPLATE_TRAINER_INVITATION => 'emails/trainer_invitation.html.twig',
+        SendEmailMessage::TEMPLATE_PLAYER_WELCOME => 'emails/player_welcome.html.twig',
+        SendEmailMessage::TEMPLATE_COACH_INVITATION => 'emails/coach_invitation.html.twig',
+        SendEmailMessage::TEMPLATE_COACH_WELCOME => 'emails/coach_welcome.html.twig',
+        SendEmailMessage::TEMPLATE_DUPLICATE_REGISTRATION_ATTEMPT => 'emails/duplicate_registration_attempt.html.twig',
+        SendEmailMessage::TEMPLATE_PLAYER_TRAINER_CONNECTED => 'emails/player_trainer_connected.html.twig',
     ];
 
     public function __construct(
@@ -135,6 +140,36 @@ final class SendEmailMessageHandler
                     ['token' => $message->context['token']],
                     UrlGeneratorInterface::ABSOLUTE_URL,
                 ),
+            ],
+            SendEmailMessage::TEMPLATE_PLAYER_WELCOME => [
+                'verificationUrl' => $this->urlGenerator->generate(
+                    'app_verify_email',
+                    ['token' => $message->context['token']],
+                    UrlGeneratorInterface::ABSOLUTE_URL,
+                ),
+                'trainerName' => $message->context['trainerName'],
+            ],
+            SendEmailMessage::TEMPLATE_COACH_INVITATION => [
+                'invitationUrl' => $this->urlGenerator->generate(
+                    'app_coach_invitation',
+                    ['token' => $message->context['token']],
+                    UrlGeneratorInterface::ABSOLUTE_URL,
+                ),
+                'trainerName' => $message->context['trainerName'],
+                'message' => $message->context['message'],
+            ],
+            SendEmailMessage::TEMPLATE_COACH_WELCOME => [
+                'verificationUrl' => $this->urlGenerator->generate(
+                    'app_verify_email',
+                    ['token' => $message->context['token']],
+                    UrlGeneratorInterface::ABSOLUTE_URL,
+                ),
+            ],
+            SendEmailMessage::TEMPLATE_DUPLICATE_REGISTRATION_ATTEMPT => [
+                'trainerName' => $message->context['trainerName'],
+            ],
+            SendEmailMessage::TEMPLATE_PLAYER_TRAINER_CONNECTED => [
+                'trainerName' => $message->context['trainerName'],
             ],
             default => throw new \InvalidArgumentException(
                 \sprintf('Unknown SendEmailMessage template identifier "%s".', $message->template),

@@ -1,0 +1,82 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Your coaches{% endblock %}
+
+{% block h1 %}Your coaches{% endblock %}
+
+{% block body %}
+    <section>
+        <h2>Active coaches</h2>
+        {% if coaches is empty %}
+            <p>No coaches yet.</p>
+        {% else %}
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Joined</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for association in coaches %}
+                        <tr>
+                            <td>{{ association.coach.displayName }}</td>
+                            <td>{{ association.coach.email }}</td>
+                            <td>{{ association.createdAt|date('Y-m-d') }}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </section>
+
+    <section>
+        <h2>Invitations sent</h2>
+        {% if invitations is empty %}
+            <p>No invitations sent yet.</p>
+        {% else %}
+            <table>
+                <thead>
+                    <tr>
+                        <th scope="col">Email</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Sent</th>
+                        <th scope="col"></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for invitation in invitations %}
+                        {% set status = invitation.status(now) %}
+                        <tr>
+                            <td>{{ invitation.invitedEmail }}</td>
+                            <td>{{ invitation.invitedName ?? '' }}</td>
+                            <td>{{ status.value|capitalize }}</td>
+                            <td>{{ invitation.createdAt|date('Y-m-d') }}</td>
+                            <td>
+                                {% if status.value != 'PENDING' %}
+                                    <a href="{{ path('app_trainer_coaches', {reinvite_email: invitation.invitedEmail, reinvite_name: invitation.invitedName}) }}#invite-form">Invite again</a>
+                                {% endif %}
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    </section>
+
+    <section id="invite-form">
+        <h2>Invite a coach</h2>
+        {{ form_start(invitationForm) }}
+            {{ error_summary.summary(invitationForm) }}
+            {{ form_row(invitationForm.email) }}
+            {{ form_row(invitationForm.name) }}
+            {{ form_row(invitationForm.message) }}
+            <div class="actions">
+                <button type="submit">Send invitation</button>
+            </div>
+        {{ form_end(invitationForm) }}
+    </section>
+{% endblock %}

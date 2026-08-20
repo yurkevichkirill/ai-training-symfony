@@ -1,0 +1,30 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Your players{% endblock %}
+
+{% block h1 %}Your players{% endblock %}
+
+{% block body %}
+    {% if roster is empty %}
+        <p>No players yet. Share your <a href="{{ path('app_trainer_share_link') }}">invite link</a> to get started.</p>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Email</th>
+                    <th scope="col">Joined</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for association in roster %}
+                    <tr>
+                        <td>{{ playerProfiles[association.player.id.toRfc4122]?.playerName ?? association.player.displayName }}</td>
+                        <td>{{ association.player.email }}</td>
+                        <td>{{ association.createdAt|date('Y-m-d') }}</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+{% endblock %}

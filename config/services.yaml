@@ -73,6 +73,32 @@ services:
         arguments:
             $mailerFromAddress: '%app.mailer_from_address%'
 
+    # `RateLimiterFactory` (the concrete class, matching every other
+    # rate-limiter consumer in this project) has no autowiring alias of its
+    # own -- only `RateLimiterFactoryInterface` gets one, per
+    # `FrameworkExtension::registerRateLimiterConfiguration()`. Bind
+    # explicitly, same as `LoginRateLimiter`/`PasswordResetService` above
+    # (S3, Task 20). `bind:`, not `arguments:` -- neither controller has a
+    # constructor; the limiter is a per-action argument, and `bind:` is
+    # what `RegisterControllerArgumentLocatorsPass` also resolves action
+    # arguments against.
+    App\Controller\PlayerShareLinkController:
+        bind:
+            $shareLinkRegistrationSourceLimiter: '@limiter.share_link_registration_source'
+
+    App\Controller\CoachInvitationController:
+        bind:
+            $shareLinkRegistrationSourceLimiter: '@limiter.share_link_registration_source'
+
+    # Task 34 hardening fix: same `bind:` mechanism as the two controllers
+    # above -- `Trainer\CoachController::invite()` has no constructor, so
+    # both `coach_invitation_*` limiters (config/packages/rate_limiter.yaml)
+    # arrive as per-action method arguments (AC-5, AC-19).
+    App\Controller\Trainer\CoachController:
+        bind:
+            $coachInvitationAccountLimiter: '@limiter.coach_invitation_account'
+            $coachInvitationSourceLimiter: '@limiter.coach_invitation_source'
+
     App\Service\FileStorage:
         arguments:
             $uploadsDir: '%app.uploads_dir%'

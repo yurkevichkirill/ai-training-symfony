@@ -1,0 +1,12 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Unable to accept invitation{% endblock %}
+
+{% block h1 %}Unable to accept invitation{% endblock %}
+
+{% block body %}
+    <p role="alert" class="alert-message">{{ reason }}</p>
+    <ul class="link-list">
+        <li><a href="{{ path('app_login') }}">Go to sign in</a></li>
+    </ul>
+{% endblock %}

@@ -1,0 +1,24 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Create your coach account{% endblock %}
+
+{% block h1 %}Create your coach account{% endblock %}
+
+{% block body %}
+    <p>You've been invited to join as a coach for <strong>{{ invitation.invitedEmail }}</strong>.</p>
+
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {{ form_row(form.firstName) }}
+        {{ form_row(form.lastName) }}
+        {{ form_row(form.plainPassword.first, {attr: {autocomplete: 'new-password'}}) }}
+        {{ form_row(form.plainPassword.second, {attr: {autocomplete: 'new-password'}}) }}
+        {{ form_row(form.phone) }}
+        <div class="actions">
+            <button type="submit">Create account</button>
+        </div>
+    {{ form_end(form) }}
+
+    <p>Already have an account? <a href="{{ path('app_login') }}">Sign in</a>, then open this link again.</p>
+{% endblock %}

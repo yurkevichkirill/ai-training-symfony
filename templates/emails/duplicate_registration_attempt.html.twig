@@ -1,0 +1,32 @@
+{# `App\MessageHandler\SendEmailMessageHandler` renders this file the same
+   three ways verify_email.html.twig documents. Sent to an *existing*
+   account whenever someone submits its email address on a player
+   ShareLink's public registration form (AC-10 amendment, enumeration
+   resistance -- Task 35). Context: `trainerName` (the owning trainer's
+   display name for the link that was used). No link, no token: this is a
+   notice, not an action -- the recipient's account is untouched either
+   way, so there is nothing here to click. #}
+{% if false %}
+    {% block subject %}Someone tried to register with your email address{% endblock %}
+    {% block text %}
+Hello,
+
+Someone attempted to register a new account with your email address via
+{{ trainerName }}'s invite link.
+
+If this wasn't you, no action is needed -- your account is unaffected. If
+you don't recognize this trainer, you may want to review your account.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello,</p>
+        <p>Someone attempted to register a new account with your email address via {{ trainerName }}'s invite link.</p>
+        <p>If this wasn't you, no action is needed -- your account is unaffected. If you don't recognize this trainer, you may want to review your account.</p>
+    </body>
+</html>

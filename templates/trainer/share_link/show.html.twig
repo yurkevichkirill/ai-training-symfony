@@ -1,0 +1,11 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Your player invite link{% endblock %}
+
+{% block h1 %}Your player invite link{% endblock %}
+
+{% block body %}
+    <p>Share this link with anyone you'd like to invite as a player. It never expires and can be used any number of times.</p>
+    <p class="meta"><code>{{ url('app_share_link_follow', {code: link.code}) }}</code></p>
+    <p class="meta">Used {{ link.usageCount }} time{{ link.usageCount == 1 ? '' : 's' }}.</p>
+{% endblock %}

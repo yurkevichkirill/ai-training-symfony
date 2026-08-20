@@ -1,0 +1,43 @@
+{# `App\MessageHandler\SendEmailMessageHandler` renders this file the same
+   three ways verify_email.html.twig documents. Context: `invitationUrl` (an
+   absolute URL to `app_coach_invitation`, built by the handler from the
+   message's raw `token`), `trainerName`, and `message` (the trainer's
+   optional personal note -- an empty string, never null, per
+   `CoachInvitationService::invite()`'s `?? ''` -- AC-5). #}
+{% if false %}
+    {% block subject %}You've been invited to coach on the platform{% endblock %}
+    {% block text %}
+Hello,
+
+{{ trainerName }} has invited you to join the platform as a coach.
+{% if message %}
+
+Their message to you:
+"{{ message }}"
+{% endif %}
+
+Open the link below to accept the invitation:
+
+{{ invitationUrl }}
+
+This link expires in 7 days. If you were not expecting this invitation, you
+can safely ignore this email.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello,</p>
+        <p>{{ trainerName }} has invited you to join the platform as a coach.</p>
+        {% if message %}
+            <p>Their message to you:</p>
+            <blockquote>{{ message }}</blockquote>
+        {% endif %}
+        <p><a href="{{ invitationUrl }}">Accept the invitation</a></p>
+        <p>This link expires in 7 days. If you were not expecting this invitation, you can safely ignore this email.</p>
+    </body>
+</html>

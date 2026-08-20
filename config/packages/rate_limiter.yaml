@@ -33,3 +33,48 @@ framework:
             limit: 10
             interval: '1 hour'
             cache_pool: cache.rate_limiter
+
+        # S3 (edge case: a player/coach ShareLink URL scraped far beyond its
+        # intended audience). `/join/{code}/register` and
+        # `/coach-invitation/{token}`'s registration-submission branch had no
+        # equivalent limiter before this slice -- S1 only rate-limited
+        # sign-in and password reset, and had no registration endpoint at
+        # all. Source-only, like login_source/password_reset_source: there
+        # is no account yet to key a second limiter on.
+        share_link_registration_source:
+            policy: sliding_window
+            limit: 20
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter
+
+        # Task 34 hardening fix: `Trainer\CoachController::invite()` sends
+        # mail (the coach invitation email) but, unlike every other
+        # mail-sending endpoint in this project, had no rate limit at all.
+        # Same shape and numbers as `password_reset_account` above --
+        # keyed on the trainer's own user id (the account taking the
+        # action, not the invited address), so a compromised or careless
+        # trainer session cannot be used to blast invitation mail
+        # indefinitely. Unlike password_reset_account, an exhausted limiter
+        # here is safe to surface directly to the trainer as a field-level
+        # form error (AC-5, AC-19): the trainer is already a known,
+        # authenticated account, so there is no enumeration concern to
+        # protect by staying silent the way password reset's non-enumerating
+        # flow must.
+        coach_invitation_account:
+            policy: sliding_window
+            limit: 3
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter
+
+        # Same shape and numbers as `password_reset_source` above -- keyed
+        # on the client IP truncated via `IpTruncator`, independent of any
+        # one trainer account, so a burst from one source across many
+        # trainer sessions (or many never-signed-in attempts hitting the
+        # same public-adjacent surface) still trips. The *source* limiter
+        # is the one this project's convention surfaces as a 429
+        # (AC-5, AC-19).
+        coach_invitation_source:
+            policy: sliding_window
+            limit: 10
+            interval: '1 hour'
+            cache_pool: cache.rate_limiter

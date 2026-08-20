@@ -76,6 +76,13 @@ security:
         - { path: ^/reset-password, roles: PUBLIC_ACCESS }
         - { path: ^/verify-email, roles: PUBLIC_ACCESS }
         - { path: ^/invitations, roles: PUBLIC_ACCESS }
+        # S3 (AC-1, AC-3, AC-14): the two public ShareLink/coach-invitation
+        # landing pages -- positioned ahead of the `^/` catch-all, same
+        # rule as every other public prefix above. RouterSweepTest
+        # (tests/Functional/RouterSweepTest.php) reads this file directly,
+        # so these two lines are what extends its allow-list too.
+        - { path: ^/join, roles: PUBLIC_ACCESS }
+        - { path: ^/coach-invitation, roles: PUBLIC_ACCESS }
         - { path: ^/(css|js|images)/, roles: PUBLIC_ACCESS }
         - { path: ^/favicon.ico, roles: PUBLIC_ACCESS }
         - { path: ^/, roles: ROLE_USER }

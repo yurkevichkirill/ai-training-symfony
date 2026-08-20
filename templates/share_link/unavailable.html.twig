@@ -1,0 +1,12 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Invitation no longer available{% endblock %}
+
+{% block h1 %}Invitation no longer available{% endblock %}
+
+{% block body %}
+    <p role="alert" class="alert-message">This invitation link is no longer available.</p>
+    <ul class="link-list">
+        <li><a href="{{ path('app_login') }}">Go to sign in</a></li>
+    </ul>
+{% endblock %}

@@ -1,0 +1,31 @@
+{# `App\MessageHandler\SendEmailMessageHandler` renders this file the same
+   three ways verify_email.html.twig documents. Sent to the player on every
+   genuinely new `TrainerPlayerAssociation` row (Task 36, AC-11 amendment) --
+   both the first-ever connection and any later "existing account follows a
+   second trainer's link" case (AC-12) -- never on the idempotent
+   "already actively associated" branch. Context: `trainerName` (the newly
+   connected trainer's display name). No link, no token: this is a notice
+   about something that already happened, not an action to take. #}
+{% if false %}
+    {% block subject %}You're connected with {{ trainerName }}{% endblock %}
+    {% block text %}
+Hello,
+
+You're now connected with {{ trainerName }}.
+
+If you did not expect this, you can leave this trainer at any time from
+your account.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello,</p>
+        <p>You're now connected with {{ trainerName }}.</p>
+        <p>If you did not expect this, you can leave this trainer at any time from your account.</p>
+    </body>
+</html>

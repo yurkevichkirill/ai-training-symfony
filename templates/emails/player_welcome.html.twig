@@ -1,0 +1,34 @@
+{# `App\MessageHandler\SendEmailMessageHandler` renders this file the same
+   three ways verify_email.html.twig documents. Context: `verificationUrl`
+   (an absolute URL to `app_verify_email`, built by the handler from the
+   message's raw `token`) and `trainerName` (the owning trainer's display
+   name, passed straight through -- AC-9). This *is* the account's
+   verification email, not a separate welcome note (architecture Decisions
+   Q5'): sign-in stays refused until this link is opened. #}
+{% if false %}
+    {% block subject %}Welcome -- verify your email address{% endblock %}
+    {% block text %}
+Hello,
+
+You've registered as a player with {{ trainerName }}. Please verify your
+email address by opening the link below to activate your account:
+
+{{ verificationUrl }}
+
+This link expires in 24 hours. If you did not request this, you can safely
+ignore this email.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello,</p>
+        <p>You've registered as a player with {{ trainerName }}. Please verify your email address by clicking the link below to activate your account:</p>
+        <p><a href="{{ verificationUrl }}">Verify your email address</a></p>
+        <p>This link expires in 24 hours. If you did not request this, you can safely ignore this email.</p>
+    </body>
+</html>

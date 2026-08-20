@@ -1,0 +1,35 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Your trainers{% endblock %}
+
+{% block h1 %}Your trainers{% endblock %}
+
+{% block body %}
+    {% if roster is empty %}
+        <p>You are not currently connected with any trainer.</p>
+    {% else %}
+        <table>
+            <thead>
+                <tr>
+                    <th scope="col">Trainer</th>
+                    <th scope="col">Connected since</th>
+                    <th scope="col">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for association in roster %}
+                    <tr>
+                        <td>{{ association.trainer.displayName }}</td>
+                        <td>{{ association.createdAt|date('Y-m-d') }}</td>
+                        <td>
+                            <form method="post" action="{{ path('app_player_trainers_leave', {id: association.trainer.id}) }}" style="display:inline">
+                                <input type="hidden" name="_token" value="{{ csrf_token('player_leave_trainer_' ~ association.trainer.id) }}">
+                                <button type="submit">Leave</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% endif %}
+{% endblock %}

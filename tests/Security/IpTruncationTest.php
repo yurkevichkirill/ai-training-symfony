@@ -10,8 +10,10 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Standalone coverage for the one part of LoginRateLimiter's `login_source`
- * key that is easy to get wrong: the /24 (IPv4) and /64 (IPv6) bitmask. Each
- * vector below is a concrete address/result pair, not just "looks right".
+ * key that is easy to get wrong: the /24 (IPv4) and /48 (IPv6) bitmask
+ * (Task 38 hardening fix widened the IPv6 prefix from /64 to /48 -- see
+ * `IpTruncator`'s docblock). Each vector below is a concrete address/result
+ * pair, not just "looks right".
  */
 final class IpTruncationTest extends TestCase
 {
@@ -22,7 +24,7 @@ final class IpTruncationTest extends TestCase
     }
 
     #[DataProvider('ipv6Vectors')]
-    public function testIpv6IsTruncatedToSlash64(string $input, string $expected): void
+    public function testIpv6IsTruncatedToSlash48(string $input, string $expected): void
     {
         self::assertSame($expected, IpTruncator::truncate($input));
     }
@@ -43,19 +45,19 @@ final class IpTruncationTest extends TestCase
         );
     }
 
-    public function testTwoIpv6AddressesInTheSameSlash64TruncateToTheSameKey(): void
+    public function testTwoIpv6AddressesInTheSameSlash48TruncateToTheSameKey(): void
     {
         self::assertSame(
             IpTruncator::truncate('2001:db8:85a3:8d3:1319:8a2e:370:7348'),
-            IpTruncator::truncate('2001:db8:85a3:8d3:ffff:ffff:ffff:ffff'),
+            IpTruncator::truncate('2001:db8:85a3:ffff:ffff:ffff:ffff:ffff'),
         );
     }
 
-    public function testTwoIpv6AddressesInDifferentSlash64sTruncateDifferently(): void
+    public function testTwoIpv6AddressesInDifferentSlash48sTruncateDifferently(): void
     {
         self::assertNotSame(
             IpTruncator::truncate('2001:db8:85a3:8d3:1319:8a2e:370:7348'),
-            IpTruncator::truncate('2001:db8:85a3:8d4:1319:8a2e:370:7348'),
+            IpTruncator::truncate('2001:db8:85a4:8d3:1319:8a2e:370:7348'),
         );
     }
 
@@ -84,12 +86,12 @@ final class IpTruncationTest extends TestCase
      */
     public static function ipv6Vectors(): iterable
     {
-        yield 'ordinary address, non-zero interface identifier' => [
+        yield 'ordinary address, non-zero beyond the first 48 bits' => [
             '2001:db8:85a3:8d3:1319:8a2e:370:7348',
-            '2001:db8:85a3:8d3::',
+            '2001:db8:85a3::',
         ];
         yield 'loopback' => ['::1', '::'];
         yield 'all-zero network, non-zero identifier' => ['::abcd', '::'];
-        yield 'network already at a /64 boundary' => ['2001:db8::', '2001:db8::'];
+        yield 'network already at a /48 boundary' => ['2001:db8:85a3::', '2001:db8:85a3::'];
     }
 }

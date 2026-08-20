@@ -6,13 +6,19 @@ namespace App\Security;
 
 /**
  * Truncates a client IP to the block LoginRateLimiter's `login_source`
- * limiter keys on: a /24 for IPv4 (zero the last octet), a /64 for IPv6
- * (zero the last 64 bits -- the interface identifier, which a single host
- * can rotate freely under privacy extensions/SLAAC). Truncating means a
- * host that rotates its address within the same block still shares one
- * counter, per the architecture's note on `login_source`.
+ * limiter keys on: a /24 for IPv4 (zero the last octet), a /48 for IPv6
+ * (zero the last 80 bits -- Task 38 hardening fix, widened from the
+ * original /64. A /64 zeroes only the interface identifier, the part a
+ * single host can rotate freely under privacy extensions/SLAAC, but a /64
+ * is also the size ISPs commonly hand a single *subscriber*, not just a
+ * single device -- keying that narrowly let every device behind one
+ * subscriber's router count as a different source. /48 is the block size
+ * realistically delegated to one subscriber site, so it is what actually
+ * groups "the same real-world source" together). Truncating means a host
+ * that rotates its address within the same block still shares one counter,
+ * per the architecture's note on `login_source`.
  *
- * Both prefixes land on a byte boundary (24 = 3 bytes of 4, 64 = 8 bytes of
+ * Both prefixes land on a byte boundary (24 = 3 bytes of 4, 48 = 6 bytes of
  * 16), so truncation is "keep the leading N bytes, zero the rest" -- no bit
  * masking inside a byte is needed, which is deliberately simple to keep the
  * one place this is easy to get wrong (the bitmask) easy to verify.
@@ -46,9 +52,9 @@ final class IpTruncator
         }
 
         // 4 bytes (32 bits) for IPv4 -> keep 3 (/24); 16 bytes (128 bits)
-        // for IPv6 -> keep 8 (/64).
+        // for IPv6 -> keep 6 (/48).
         $length = \strlen($packed);
-        $keepBytes = 4 === $length ? 3 : 8;
+        $keepBytes = 4 === $length ? 3 : 6;
 
         $truncated = substr($packed, 0, $keepBytes).str_repeat("\0", $length - $keepBytes);
 
