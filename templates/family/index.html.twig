@@ -20,6 +20,11 @@
                     <dd>{{ child.signInEnabled ? 'Enabled' : 'Not enabled' }}</dd>
                 </dl>
 
+                {% if childUser.photoKey %}
+                    <img src="{{ path('app_photo_show', {userId: childUser.id}) }}" alt="{{ childUser.displayName }}'s current photo" class="profile-photo-preview">
+                {% else %}
+                    <p class="meta">No photo uploaded yet.</p>
+                {% endif %}
                 <form method="post" action="{{ path('app_family_child_photo', {id: childUser.id}) }}" enctype="multipart/form-data">
                     <input type="hidden" name="_token" value="{{ csrf_token('submit') }}">
                     <input type="file" name="photo" accept="image/jpeg,image/png,image/webp">

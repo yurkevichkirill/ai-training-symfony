@@ -36,6 +36,24 @@
            trainer's logo/color override can render as page chrome. #}
         {{ include('_branding.html.twig') }}
 
+        {# Global flash rendering: every controller across the app calls
+           addFlash('success', ...) / addFlash('error', ...) and redirects,
+           expecting the next page to show the result. Rendering flashes
+           here -- once, unconditionally -- means no template has to opt in,
+           the same rule the impersonation banner and branding partial above
+           already follow. `success` reuses the `.status-message`/role="status"
+           convention already established by login/verify-email/etc.; `error`
+           reuses `.alert-message`/role="alert", the same convention used for
+           inline failure text elsewhere (see form/_error_summary.html.twig). #}
+        <div class="flash-messages">
+            {% for message in app.flashes('success') %}
+                <p role="status" class="status-message flash-message flash-message--success">{{ message }}</p>
+            {% endfor %}
+            {% for message in app.flashes('error') %}
+                <p role="alert" class="alert-message flash-message flash-message--error">{{ message }}</p>
+            {% endfor %}
+        </div>
+
         {# Exactly one <h1> per page: every page template sets the `h1` block
            and nothing else renders a top-level heading, so no page can end up
            with zero or with more than one (AC-22). #}

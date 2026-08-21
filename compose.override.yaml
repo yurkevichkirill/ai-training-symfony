@@ -10,3 +10,25 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
 ###< symfony/mailer ###
+
+###> symfony/messenger (worker) ###
+  worker:
+    build:
+      context: ./docker/php
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    volumes:
+      - ./:/app:cached
+    working_dir: /app
+    depends_on:
+      database:
+        condition: service_healthy
+      mailer:
+        condition: service_started
+    # Consumes the `async` Messenger transport (queued emails, etc.)
+    # continuously and restarts itself between batches, so a stuck/leaked
+    # connection can never wedge the worker forever.
+    command: ["sh", "-c", "while true; do php bin/console messenger:consume async --time-limit=3600 --memory-limit=128M -vv; sleep 1; done"]
+    restart: unless-stopped
+###< symfony/messenger (worker) ###

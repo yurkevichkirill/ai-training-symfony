@@ -15,6 +15,11 @@
     </dl>
 
     <h2>Photo</h2>
+    {% if user.photoKey %}
+        <img src="{{ path('app_photo_show', {userId: user.id}) }}" alt="Your current profile photo" class="profile-photo-preview">
+    {% else %}
+        <p class="meta">No photo uploaded yet.</p>
+    {% endif %}
     <form method="post" action="{{ path('app_profile_photo_upload') }}" enctype="multipart/form-data">
         <input type="hidden" name="_token" value="{{ csrf_token('submit') }}">
         <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required>
