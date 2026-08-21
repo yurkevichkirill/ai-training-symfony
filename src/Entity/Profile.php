@@ -28,7 +28,7 @@ use Symfony\Component\Uid\UuidV7;
 #[ORM\UniqueConstraint(name: 'uniq_profile_user_type', columns: ['user_id', 'type'])]
 #[ORM\InheritanceType('JOINED')]
 #[ORM\DiscriminatorColumn(name: 'type', type: 'string', length: 32)]
-#[ORM\DiscriminatorMap(['TRAINER' => ProfileTrainer::class, 'PLAYER' => ProfilePlayer::class])]
+#[ORM\DiscriminatorMap(['TRAINER' => ProfileTrainer::class, 'PLAYER' => ProfilePlayer::class, 'COACH' => ProfileCoach::class])]
 abstract class Profile
 {
     #[ORM\Id]

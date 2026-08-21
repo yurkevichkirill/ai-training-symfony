@@ -4,15 +4,21 @@ declare(strict_types=1);
 
 namespace App\Controller\Trainer;
 
+use App\Availability\TimeRange;
+use App\Availability\WeeklyAvailability;
 use App\Entity\User;
 use App\Form\CoachInvitationFormType;
+use App\Repository\CoachAvailabilitySlotRepository;
 use App\Repository\CoachInvitationRepository;
 use App\Repository\TrainerCoachAssociationRepository;
 use App\Security\IpTruncator;
+use App\Service\AvailabilitySummaryFormatter;
 use App\Service\CoachInvitationRequest;
 use App\Service\CoachInvitationService;
+use App\Service\TrainerBrandingResolver;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Form\FormError;
+use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
@@ -29,6 +35,15 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 #[IsGranted('ROLE_TRAINER')]
 final class CoachController extends AbstractController
 {
+    public function __construct(
+        private readonly TrainerCoachAssociationRepository $associationRepository,
+        private readonly CoachInvitationRepository $invitationRepository,
+        private readonly CoachAvailabilitySlotRepository $availabilitySlotRepository,
+        private readonly AvailabilitySummaryFormatter $availabilitySummaryFormatter,
+        private readonly TrainerBrandingResolver $brandingResolver,
+    ) {
+    }
+
     /**
      * AC-17, AC-18's re-invite affordance: the active-coach roster and the
      * full invitation history are two independent reads, rendered
@@ -36,11 +51,8 @@ final class CoachController extends AbstractController
      * uses to offer "invite again" for anything no longer Pending.
      */
     #[Route('/trainer/coaches', name: 'app_trainer_coaches', methods: ['GET'])]
-    public function index(
-        Request $request,
-        TrainerCoachAssociationRepository $associationRepository,
-        CoachInvitationRepository $invitationRepository,
-    ): Response {
+    public function index(Request $request): Response
+    {
         /** @var User $trainer */
         $trainer = $this->getUser();
 
@@ -54,15 +66,60 @@ final class CoachController extends AbstractController
             'name' => $request->query->get('reinvite_name'),
         ];
 
-        return $this->render('trainer/coach/index.html.twig', [
-            'coaches' => $associationRepository->findActiveFor($trainer),
-            'invitations' => $invitationRepository->findForTrainer($trainer),
-            'invitationForm' => $this->createForm(CoachInvitationFormType::class, $reinviteData, [
+        return $this->render('trainer/coach/index.html.twig', $this->coachesPageData(
+            $trainer,
+            $this->createForm(CoachInvitationFormType::class, $reinviteData, [
                 'action' => $this->generateUrl('app_trainer_coach_invite'),
                 'method' => 'POST',
             ]),
+        ));
+    }
+
+    /**
+     * The one place `trainer/coach/index.html.twig`'s variables are assembled.
+     *
+     * Task 37 review fix: `invite()`'s two error paths (rate-limited, and
+     * invalid form) each rendered this template with a hand-built array that
+     * omitted `availabilitySummaries`. The template's defensive
+     * `availabilitySummaries|default({})` swallowed the omission instead of
+     * erroring, so every coach on the roster silently displayed "Not
+     * available" -- misreporting a saved schedule as none -- whenever the
+     * invite form came back with an error. Building the payload once here
+     * means a caller cannot forget a variable again.
+     *
+     * @return array<string, mixed>
+     */
+    private function coachesPageData(User $trainer, FormInterface $invitationForm): array
+    {
+        $coaches = $this->associationRepository->findActiveFor($trainer);
+
+        // Task 26 (AC-5): one batched read for the whole roster, no N+1.
+        // `findActiveFor()`'s own `WHERE ended_at IS NULL` is what makes
+        // AC-5's negative half true -- a coach no longer actively
+        // associated never appears in `$coaches` at all, so its
+        // availability is never even fetched, let alone rendered.
+        $coachUsers = array_map(static fn ($association) => $association->getCoach(), $coaches);
+        $slotsByCoach = [];
+
+        foreach ($this->availabilitySlotRepository->findForCoaches($coachUsers) as $slot) {
+            $slotsByCoach[(string) $slot->getCoach()->getId()][$slot->getDayOfWeek()][] = new TimeRange($slot->getStartsAtMinute(), $slot->getEndsAtMinute());
+        }
+
+        $availabilitySummaries = [];
+        foreach ($coachUsers as $coachUser) {
+            $availabilitySummaries[(string) $coachUser->getId()] = $this->availabilitySummaryFormatter->summarizeWeek(
+                new WeeklyAvailability($slotsByCoach[(string) $coachUser->getId()] ?? []),
+            );
+        }
+
+        return [
+            'coaches' => $coaches,
+            'invitations' => $this->invitationRepository->findForTrainer($trainer),
+            'availabilitySummaries' => $availabilitySummaries,
+            'invitationForm' => $invitationForm,
             'now' => new \DateTimeImmutable(),
-        ]);
+            'branding' => $this->brandingResolver->forViewerChrome($trainer),
+        ];
     }
 
     /**
@@ -88,8 +145,6 @@ final class CoachController extends AbstractController
     public function invite(
         Request $request,
         CoachInvitationService $invitationService,
-        TrainerCoachAssociationRepository $associationRepository,
-        CoachInvitationRepository $invitationRepository,
         RateLimiterFactory $coachInvitationAccountLimiter,
         RateLimiterFactory $coachInvitationSourceLimiter,
     ): Response {
@@ -120,12 +175,7 @@ final class CoachController extends AbstractController
             if (!$accountLimit->isAccepted()) {
                 $form->get('email')->addError(new FormError("You've sent too many invitations recently. Please try again later."));
 
-                return $this->render('trainer/coach/index.html.twig', [
-                    'coaches' => $associationRepository->findActiveFor($trainer),
-                    'invitations' => $invitationRepository->findForTrainer($trainer),
-                    'invitationForm' => $form,
-                    'now' => new \DateTimeImmutable(),
-                ]);
+                return $this->render('trainer/coach/index.html.twig', $this->coachesPageData($trainer, $form));
             }
 
             /** @var array{email: string, name: ?string, message: ?string} $data */
@@ -141,11 +191,6 @@ final class CoachController extends AbstractController
             return $this->redirectToRoute('app_trainer_coaches');
         }
 
-        return $this->render('trainer/coach/index.html.twig', [
-            'coaches' => $associationRepository->findActiveFor($trainer),
-            'invitations' => $invitationRepository->findForTrainer($trainer),
-            'invitationForm' => $form,
-            'now' => new \DateTimeImmutable(),
-        ]);
+        return $this->render('trainer/coach/index.html.twig', $this->coachesPageData($trainer, $form));
     }
 }

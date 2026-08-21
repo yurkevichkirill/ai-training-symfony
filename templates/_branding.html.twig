@@ -1,0 +1,21 @@
+{# The one branding partial (D3c, D4b). Renders nothing at all unless a
+   `branding` variable was explicitly passed to the template that included
+   `base.html.twig` -- inert by default on every page that opts out, which
+   is every page except the three tiers named in the architecture's D3.
+   No Twig global, no fallback: a missing `branding` variable is silence,
+   never a guess.
+
+   `branding is defined` alone is not enough: `TrainerBrandingResolver::forViewerChrome()`
+   is a *total* function that legitimately returns `null` for tier A (e.g. a
+   coach with no active trainer association right now) -- a defined-but-null
+   variable must render nothing too, not crash trying to read a property off
+   `null` (a real bug this exact guard shipped with, caught by the S1..S6
+   regression suite's `RoleLandingTest` once a coach with no trainer hit a
+   branded page). #}
+{% if branding is defined and branding is not null %}
+    <div class="branding" style="--color-primary: {{ branding.primaryColorHex }}; --color-primary-contrast: {{ branding.contrastColorHex }};">
+        {% if branding.hasLogo %}
+            <img src="{{ branding.logoUrl }}" alt="Trainer logo" style="max-height: 200px; max-width: 200px; width: auto;">
+        {% endif %}
+    </div>
+{% endif %}

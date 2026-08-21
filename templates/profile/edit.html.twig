@@ -45,4 +45,18 @@
             </div>
         {{ form_end(trainerForm) }}
     {% endif %}
+
+    {% if coachForm is not null %}
+        <h2>Coach details</h2>
+        {{ form_start(coachForm, {action: path('app_profile_edit_coach')}) }}
+            {{ error_summary.summary(coachForm) }}
+            {{ form_row(coachForm.bio) }}
+            {{ form_row(coachForm.credentials) }}
+            {{ form_row(coachForm.certifications) }}
+            {{ form_row(coachForm.isPublic) }}
+            <div class="actions">
+                <button type="submit">Save coach details</button>
+            </div>
+        {{ form_end(coachForm) }}
+    {% endif %}
 {% endblock %}

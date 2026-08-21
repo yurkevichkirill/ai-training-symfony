@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace App\Repository;
 
+use App\Entity\PlayerAvailabilitySlot;
 use App\Entity\TrainerPlayerAssociation;
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
+use Doctrine\ORM\Query\Expr\Join;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
@@ -84,6 +86,74 @@ class TrainerPlayerAssociationRepository extends ServiceEntityRepository
             ->andWhere('association.player = :player')
             ->andWhere('association.endedAt IS NULL')
             ->setParameter('player', $player)
+            ->orderBy('association.createdAt', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Task 20 (AC-11, AC-12, AC-18): every currently-active association
+     * across the given players in one query -- `PlayerContextProvider`'s one
+     * call for the whole family page (self + every child), trainer eagerly
+     * joined so it never touches a lazy proxy per row. `$players` mixes an
+     * adult and any number of children indifferently; grouping the result
+     * back out per player, so each context's `trainers` list stays that
+     * player's own, is the caller's job.
+     *
+     * @param list<User> $players
+     *
+     * @return list<TrainerPlayerAssociation>
+     */
+    public function findActiveForPlayers(array $players): array
+    {
+        if ([] === $players) {
+            return [];
+        }
+
+        /** @var list<TrainerPlayerAssociation> */
+        return $this->createQueryBuilder('association')
+            ->addSelect('trainer')
+            ->innerJoin('association.trainer', 'trainer')
+            ->andWhere('association.player IN (:players)')
+            ->andWhere('association.endedAt IS NULL')
+            ->setParameter('players', $players)
+            ->orderBy('association.createdAt', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * Task 22 (AC-23, AC-24): the trainer's roster, filtered to only the
+     * players with a `player_availability_slot` covering the given
+     * day/minute. `INNER JOIN` is what makes AC-24's "absence is Not
+     * Available, never unknown" mechanical rather than a rule this query has
+     * to remember -- a player with no row for `$dayOfWeek` simply cannot
+     * produce a match, adult and child alike (AC-23). `player` and the
+     * matched `slot` are both eagerly selected so the view never touches a
+     * lazy proxy per row. `distinct()` guards against a duplicate association
+     * row surfacing only if a player's slots were ever left un-normalized
+     * (two rows both covering `$minute`) -- `AvailabilityService::replaceWeek()`
+     * never allows that to happen in practice, since `WeeklyAvailability::normalized()`
+     * merges any pair that overlaps.
+     *
+     * @return list<TrainerPlayerAssociation>
+     */
+    public function findRosterAvailableAt(User $trainer, int $dayOfWeek, int $minute): array
+    {
+        /** @var list<TrainerPlayerAssociation> */
+        return $this->createQueryBuilder('association')
+            ->addSelect('player')
+            ->innerJoin('association.player', 'player')
+            ->innerJoin(PlayerAvailabilitySlot::class, 'slot', Join::WITH, 'slot.player = association.player')
+            ->andWhere('association.trainer = :trainer')
+            ->andWhere('association.endedAt IS NULL')
+            ->andWhere('slot.dayOfWeek = :dayOfWeek')
+            ->andWhere('slot.startsAtMinute <= :minute')
+            ->andWhere('slot.endsAtMinute > :minute')
+            ->setParameter('trainer', $trainer)
+            ->setParameter('dayOfWeek', $dayOfWeek)
+            ->setParameter('minute', $minute)
+            ->distinct()
             ->orderBy('association.createdAt', 'DESC')
             ->getQuery()
             ->getResult();

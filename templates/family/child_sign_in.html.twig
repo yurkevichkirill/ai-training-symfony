@@ -1,0 +1,19 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Enable sign-in{% endblock %}
+{% block h1 %}Enable sign-in for {{ child.childUser.displayName }}{% endblock %}
+
+{% block body %}
+    {% if error is not empty %}
+        <div class="error-summary" role="alert">
+            <p>{{ error }}</p>
+        </div>
+    {% endif %}
+
+    <form method="post">
+        <input type="hidden" name="_token" value="{{ csrf_token('family_child_sign_in_' ~ child.childUser.id) }}">
+        <label for="child-sign-in-email">Email</label>
+        <input id="child-sign-in-email" type="email" name="email" required>
+        <button type="submit">Send invitation</button>
+    </form>
+{% endblock %}

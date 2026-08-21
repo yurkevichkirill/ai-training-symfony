@@ -1,0 +1,23 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Add a child{% endblock %}
+{% block h1 %}Add a child{% endblock %}
+
+{% block body %}
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {{ form_row(form.childName) }}
+        {{ form_row(form.age) }}
+        {{ form_row(form.gender) }}
+        {{ form_row(form.school) }}
+        {{ form_row(form.photo) }}
+        {% if form.trainerIds is defined %}
+            {{ form_row(form.trainerIds) }}
+        {% endif %}
+        {{ form_row(form.duplicateAcknowledged) }}
+        <div class="actions">
+            <button type="submit">Create</button>
+        </div>
+    {{ form_end(form) }}
+{% endblock %}

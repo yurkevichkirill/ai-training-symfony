@@ -1,0 +1,18 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Remove trainer{% endblock %}
+{% block h1 %}Remove {{ trainer.displayName }} from {{ childUser.displayName }}'s trainers?{% endblock %}
+
+{% block body %}
+    <p>
+        This ends {{ childUser.displayName }}'s connection with {{ trainer.displayName }}.
+        Any upcoming session RSVPs between them will be cancelled. This does not affect
+        any of {{ childUser.displayName }}'s other trainer connections.
+    </p>
+
+    <form method="post" action="{{ path('app_family_child_trainer_remove', {id: childUser.id, trainerId: trainer.id}) }}">
+        <input type="hidden" name="_token" value="{{ csrf_token('family_child_trainer_remove_' ~ childUser.id ~ '_' ~ trainer.id) }}">
+        <button type="submit">Remove trainer</button>
+    </form>
+    <p><a href="{{ path('app_family_index') }}">Cancel</a></p>
+{% endblock %}

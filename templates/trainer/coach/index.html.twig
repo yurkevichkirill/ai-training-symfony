@@ -17,6 +17,7 @@
                         <th scope="col">Name</th>
                         <th scope="col">Email</th>
                         <th scope="col">Joined</th>
+                        <th scope="col">Availability</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -25,6 +26,14 @@
                             <td>{{ association.coach.displayName }}</td>
                             <td>{{ association.coach.email }}</td>
                             <td>{{ association.createdAt|date('Y-m-d') }}</td>
+                            {# Task 37 review fix: was wrapped in `|default({})` with a
+                               `?? 'Not available'` tail, which turned a controller that
+                               forgot to pass `availabilitySummaries` into a silent
+                               "every coach is unavailable" misreport. The formatter
+                               already yields the literal "Not available" for a coach
+                               with no saved slots, so a direct lookup is correct here
+                               and fails loudly if a render path ever omits it again. #}
+                            <td>{{ availabilitySummaries['' ~ association.coach.id] }}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

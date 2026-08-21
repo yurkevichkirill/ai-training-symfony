@@ -1,0 +1,58 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Family{% endblock %}
+{% block h1 %}Family{% endblock %}
+
+{% block body %}
+    <p><a href="{{ path('app_family_child_new') }}">Add a child</a></p>
+
+    {% if children is empty %}
+        <p>You have not added any children yet.</p>
+    {% else %}
+        {% for child in children %}
+            {% set childUser = child.childUser %}
+            <section>
+                <h2>{{ childUser.displayName }}</h2>
+                <dl>
+                    <dt>Connected since</dt>
+                    <dd>{{ child.createdAt|date('Y-m-d') }}</dd>
+                    <dt>Sign-in</dt>
+                    <dd>{{ child.signInEnabled ? 'Enabled' : 'Not enabled' }}</dd>
+                </dl>
+
+                <form method="post" action="{{ path('app_family_child_photo', {id: childUser.id}) }}" enctype="multipart/form-data">
+                    <input type="hidden" name="_token" value="{{ csrf_token('submit') }}">
+                    <input type="file" name="photo" accept="image/jpeg,image/png,image/webp">
+                    <button type="submit">Upload photo</button>
+                </form>
+
+                {% if not child.signInEnabled %}
+                    <p><a href="{{ path('app_family_child_sign_in', {id: childUser.id}) }}">Enable sign-in</a></p>
+                {% endif %}
+
+                <h3>Trainers</h3>
+                {% set trainers = trainersByPlayer[childUser.id] ?? [] %}
+                {% if trainers is empty %}
+                    <p>Not connected with any trainer.</p>
+                {% else %}
+                    <ul>
+                        {% for association in trainers %}
+                            {% set trainerBranding = brandingByTrainer[association.trainer.id.toRfc4122] %}
+                            <li>
+                                {% if trainerBranding.hasLogo %}
+                                    <img src="{{ trainerBranding.logoUrl }}" alt="{{ association.trainer.displayName }} logo" style="max-height: 32px; max-width: 32px; width: auto; vertical-align: middle;">
+                                {% endif %}
+                                <span style="color: {{ trainerBranding.primaryColorHex }};">{{ association.trainer.displayName }}</span>
+                                (since {{ association.createdAt|date('Y-m-d') }})
+                                <a href="{{ path('app_family_child_trainer_remove_confirm', {id: childUser.id, trainerId: association.trainer.id}) }}">Remove</a>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+                <p><a href="{{ path('app_family_child_trainer_add', {id: childUser.id}) }}">Add a trainer</a></p>
+
+                <p><a href="{{ path('app_player_availability', {player: childUser.id}) }}">Edit availability</a></p>
+            </section>
+        {% endfor %}
+    {% endif %}
+{% endblock %}

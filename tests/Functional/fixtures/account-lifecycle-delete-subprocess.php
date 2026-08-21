@@ -10,15 +10,17 @@ declare(strict_types=1);
  *
  * Usage: php account-lifecycle-delete-subprocess.php <subjectUserId> <actorUserId> <ready-file> <result-file>
  *
- * `AccountLifecycleService` is built by hand from its five collaborators,
+ * `AccountLifecycleService` is built by hand from its collaborators,
  * exactly the manual-construction pattern
  * UserAccountServiceConcurrentCreationTest and the email-verification
- * subprocess already established: `AccountDeletionLogRepository` and
- * `AccountInvitationRepository` come from `ManagerRegistry::getRepository()`
- * rather than the container (their `repositoryClass` attribute is all either
- * needs), and `AccountEventRecorder`/`FileStorage` take only a
- * `ManagerRegistry`/a plain string, so no container lookup of a
- * possibly-private service is needed for any of the five.
+ * subprocess already established: `AccountDeletionLogRepository`,
+ * `AccountInvitationRepository`, and (S6) `ImpersonationSessionRepository`
+ * come from `ManagerRegistry::getRepository()` rather than the container
+ * (their `repositoryClass` attribute is all any of them needs), and
+ * `AccountEventRecorder`/`FileStorage`/`ChildAccountResolver`/
+ * `ImpersonationService` are built directly from those and plain values, so
+ * no container lookup of a possibly-private service is needed for any of
+ * them.
  *
  * <ready-file> is created immediately before calling delete() -- the parent
  * process starts its own hold-then-release window only once this process is
@@ -31,11 +33,15 @@ declare(strict_types=1);
 
 use App\Entity\AccountDeletionLog;
 use App\Entity\AccountInvitation;
+use App\Entity\ChildAccount;
+use App\Entity\ImpersonationSession;
 use App\Entity\User;
 use App\Kernel;
 use App\Service\AccountEventRecorder;
 use App\Service\AccountLifecycleService;
+use App\Service\ChildAccountResolver;
 use App\Service\FileStorage;
+use App\Service\ImpersonationService;
 use Symfony\Component\Dotenv\Dotenv;
 
 $projectDir = \dirname(__DIR__, 3);
@@ -67,12 +73,27 @@ $doctrine->getConnection()->executeQuery('SELECT 1');
 // same way config/services.yaml's own definition does is sufficient.
 $uploadsDir = $kernel->getProjectDir().'/var/uploads';
 
+// S6: AccountLifecycleService now also takes an ImpersonationService,
+// built the same manual way -- ImpersonationSessionRepository comes from
+// ManagerRegistry::getRepository() like the other two repositories above,
+// and the TTL parameter is not retrievable from this plain kernel
+// container (see the uploads_dir note above), so it is passed literally;
+// nothing in this race touches impersonation state.
+$impersonationService = new ImpersonationService(
+    $doctrine,
+    $doctrine->getRepository(ImpersonationSession::class),
+    new AccountEventRecorder($doctrine),
+    3600,
+);
+
 $service = new AccountLifecycleService(
     $doctrine,
     $doctrine->getRepository(AccountDeletionLog::class),
     $doctrine->getRepository(AccountInvitation::class),
     new AccountEventRecorder($doctrine),
     new FileStorage($uploadsDir),
+    new ChildAccountResolver($doctrine->getRepository(ChildAccount::class)),
+    $impersonationService,
 );
 
 [, $subjectUserId, $actorUserId, $readyFile, $resultFile] = $argv;

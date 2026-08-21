@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Service;
 
+use App\Entity\ProfileCoach;
 use App\Entity\ProfileTrainer;
 use App\Entity\User;
 use App\Enum\AccountEventType;
@@ -58,6 +59,40 @@ final class ProfileService
         $profile->setAddress($request->address);
         $profile->setDescription($request->description);
         $profile->touch();
+
+        $this->flush($profile);
+        $this->recordProfileUpdated($user, $actor ?? $user);
+    }
+
+    /**
+     * D1c, AC-11, AC-12, AC-13, AC-16: unlike `updateTrainerDetails()`,
+     * this **creates** the `ProfileCoach` when
+     * `ProfileRepository::findCoachProfile()` returns null -- no backfill
+     * migration runs for coaches that already exist, so the first save is
+     * the only moment a coach's `profile_coach` row comes into being.
+     * Records the same `PROFILE_UPDATED` case the trainer's business-details
+     * edit already uses; no new `AccountEventType` case for this (D6).
+     */
+    public function updateCoachDetails(User $user, ProfileCoachRequest $request, ?User $actor = null): void
+    {
+        $profile = $this->profileRepository->findCoachProfile($user);
+        $isNew = !$profile instanceof ProfileCoach;
+
+        if ($isNew) {
+            $profile = new ProfileCoach($user);
+        }
+
+        $profile->setBio($request->bio);
+        $profile->setCredentials($request->credentials);
+        $profile->setCertifications($request->certifications);
+        $profile->setIsPublic($request->isPublic);
+        $profile->touch();
+
+        if ($isNew) {
+            $entityManager = $this->managerRegistry->getManagerForClass($profile::class);
+            \assert($entityManager instanceof EntityManagerInterface);
+            $entityManager->persist($profile);
+        }
 
         $this->flush($profile);
         $this->recordProfileUpdated($user, $actor ?? $user);

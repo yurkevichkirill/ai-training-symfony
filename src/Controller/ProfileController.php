@@ -6,11 +6,14 @@ namespace App\Controller;
 
 use App\Entity\User;
 use App\Enum\UserRole;
+use App\Form\ProfileCoachFormType;
 use App\Form\ProfileCommonFormType;
 use App\Form\ProfileTrainerFormType;
 use App\Repository\ProfileRepository;
+use App\Security\CoachVoter;
 use App\Service\Exception\FileTooLargeException;
 use App\Service\Exception\UnsupportedFileTypeException;
+use App\Service\ProfileCoachRequest;
 use App\Service\ProfileCommonRequest;
 use App\Service\ProfileService;
 use App\Service\ProfileTrainerRequest;
@@ -66,9 +69,23 @@ final class ProfileController extends AbstractController
             ]);
         }
 
+        $coachForm = null;
+
+        if (UserRole::COACH === $user->getRole()) {
+            $coachProfile = $profileRepository->findCoachProfile($user);
+
+            $coachForm = $this->createForm(ProfileCoachFormType::class, [
+                'bio' => $coachProfile?->getBio(),
+                'credentials' => $coachProfile?->getCredentials(),
+                'certifications' => $coachProfile?->getCertifications(),
+                'isPublic' => $coachProfile?->isPublic() ?? false,
+            ]);
+        }
+
         return $this->render('profile/edit.html.twig', [
             'commonForm' => $commonForm,
             'trainerForm' => $trainerForm,
+            'coachForm' => $coachForm,
             'user' => $user,
         ]);
     }
@@ -97,6 +114,45 @@ final class ProfileController extends AbstractController
             ));
 
             $this->addFlash('success', 'Business details updated.');
+        }
+
+        return $this->redirectToRoute('app_profile_edit');
+    }
+
+    #[Route('/profile/coach', name: 'app_profile_edit_coach', methods: ['POST'])]
+    public function editCoach(Request $request, ProfileService $profileService, ProfileRepository $profileRepository): Response
+    {
+        /** @var User $user */
+        $user = $this->getUser();
+
+        // Task 37 review fix: was a bare `UserRole::COACH !== getRole()`
+        // comparison, which never consulted `CoachVoter::EDIT_COACH_PROFILE`
+        // -- leaving that attribute unenforced anywhere in production code and
+        // skipping the voter's `isActive()` half, so an account deactivated
+        // after its session began could still reach this writer.
+        $this->denyAccessUnlessGranted(CoachVoter::EDIT_COACH_PROFILE);
+
+        $coachProfile = $profileRepository->findCoachProfile($user);
+
+        $coachForm = $this->createForm(ProfileCoachFormType::class, [
+            'bio' => $coachProfile?->getBio(),
+            'credentials' => $coachProfile?->getCredentials(),
+            'certifications' => $coachProfile?->getCertifications(),
+            'isPublic' => $coachProfile?->isPublic() ?? false,
+        ]);
+        $coachForm->handleRequest($request);
+
+        if ($coachForm->isSubmitted() && $coachForm->isValid()) {
+            /** @var array{bio: ?string, credentials: ?string, certifications: ?string, isPublic: bool} $data */
+            $data = $coachForm->getData();
+            $profileService->updateCoachDetails($user, new ProfileCoachRequest(
+                $data['bio'] ?? null,
+                $data['credentials'] ?? null,
+                $data['certifications'] ?? null,
+                $data['isPublic'] ?? false,
+            ));
+
+            $this->addFlash('success', 'Coach details updated.');
         }
 
         return $this->redirectToRoute('app_profile_edit');

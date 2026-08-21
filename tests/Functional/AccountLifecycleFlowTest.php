@@ -6,6 +6,9 @@ namespace App\Tests\Functional;
 
 use App\Entity\AccountDeletionLog;
 use App\Entity\AccountInvitation;
+use App\Entity\ChildAccount;
+use App\Entity\PlayerAvailabilitySlot;
+use App\Entity\TrainerPlayerAssociation;
 use App\Entity\User;
 use App\Enum\UserRole;
 use App\Enum\UserStatus;
@@ -327,6 +330,64 @@ final class AccountLifecycleFlowTest extends WebTestCase
             ['id' => $playerId],
         )->fetchOne();
         self::assertSame(1, (int) $logCount, 'Exactly one account_deletion_log row must exist -- the winning insert, not a duplicate.');
+    }
+
+    /**
+     * S4 Task 39: the deliberate, chosen decision documented in
+     * `AccountLifecycleService::deactivate()`'s own docblock -- deactivating
+     * a parent does not cascade to the `child_account` row, the child's own
+     * `User`, its trainer associations, or its availability, and the child
+     * keeps signing in and using the platform while the parent loses the
+     * ability to manage the family until reactivated.
+     */
+    public function testDeactivatingAParentDoesNotCascadeToItsChild(): void
+    {
+        $admin = $this->persist(UserFactory::activeVerified(UserRole::SUPER_ADMIN));
+        $parent = $this->persist(UserFactory::activeVerified(UserRole::PLAYER));
+        $child = $this->persist(UserFactory::activeVerified(UserRole::PLAYER));
+        $trainer = $this->persist(UserFactory::activeVerified(UserRole::TRAINER));
+
+        $childAccount = new ChildAccount($child, $parent);
+        $this->em->persist($childAccount);
+
+        $association = new TrainerPlayerAssociation($trainer, $child, null);
+        $this->em->persist($association);
+
+        $slot = new PlayerAvailabilitySlot($child, 1, 540, 600);
+        $this->em->persist($slot);
+
+        $this->em->flush();
+
+        $this->lifecycleService->deactivate($parent, $admin);
+
+        $this->em->clear();
+
+        $reloadedParent = $this->em->getRepository(User::class)->find($parent->getId());
+        $reloadedChild = $this->em->getRepository(User::class)->find($child->getId());
+
+        self::assertSame(UserStatus::DEACTIVATED, $reloadedParent?->getStatus(), 'The parent itself must be deactivated.');
+        self::assertFalse($reloadedParent?->isActive(), 'A deactivated parent must lose family-management eligibility (FamilyVoter::MANAGE_FAMILY reads isActive()).');
+
+        self::assertSame(UserStatus::ACTIVE, $reloadedChild?->getStatus(), 'Deactivating a parent must never touch the child\'s own User row.');
+        self::assertTrue($reloadedChild?->isActive(), 'The child must keep being able to sign in and use the platform.');
+
+        $childAccountRow = $this->em->getConnection()->executeQuery(
+            'SELECT COUNT(*) FROM child_account WHERE id = :id',
+            ['id' => (string) $childAccount->getId()],
+        )->fetchOne();
+        self::assertSame(1, (int) $childAccountRow, 'The child_account row must survive the parent\'s deactivation untouched.');
+
+        $associationRow = $this->em->getConnection()->executeQuery(
+            'SELECT COUNT(*) FROM trainer_player_association WHERE id = :id AND ended_at IS NULL',
+            ['id' => (string) $association->getId()],
+        )->fetchOne();
+        self::assertSame(1, (int) $associationRow, 'The child\'s trainer association must survive the parent\'s deactivation, still active.');
+
+        $slotRow = $this->em->getConnection()->executeQuery(
+            'SELECT COUNT(*) FROM player_availability_slot WHERE id = :id',
+            ['id' => (string) $slot->getId()],
+        )->fetchOne();
+        self::assertSame(1, (int) $slotRow, 'The child\'s availability must survive the parent\'s deactivation untouched.');
     }
 
     public function testDeactivatingADeletedAccountIsRefused(): void

@@ -119,6 +119,33 @@ final class SendEmailMessage
      */
     public const TEMPLATE_PLAYER_TRAINER_CONNECTED = 'player_trainer_connected';
 
+    /**
+     * Consumed by `SendEmailMessageHandler` to select
+     * `templates/emails/child_share_link_request.html.twig` (S4, Player/
+     * Family Availability, AC-16). Dispatched by
+     * `ChildTrainerService::recordBlockedClick()`, to the parent's address
+     * via `NotificationAddressResolver::forPlayer()`, only when the
+     * pending `child_trainer_request` row was newly created or its
+     * `last_notified_at` is over 24 hours old (D3b's re-notification
+     * throttle) -- never on every click. Names the child and the trainer
+     * and links to the "Review Registration" action
+     * (`app_family_request_review`, shipped by
+     * `Family\ChildTrainerRequestController::review()`).
+     */
+    public const TEMPLATE_CHILD_SHARE_LINK_REQUEST = 'child_share_link_request';
+
+    /**
+     * Consumed by `SendEmailMessageHandler` to select
+     * `templates/emails/child_sign_in_invitation.html.twig` (S4, D1d).
+     * Dispatched by `ChildAccountService::enableSignIn()`, to the child's
+     * newly-set real address, once the parent opts a child into sign-in.
+     * The invitation link itself (`app_account_invitation`) already exists
+     * (S2) -- unlike `TEMPLATE_CHILD_SHARE_LINK_REQUEST`'s forward reference
+     * to a not-yet-built route, only this template's copy is new, worded for
+     * a child rather than a trainer (architecture Decision D4).
+     */
+    public const TEMPLATE_CHILD_SIGN_IN_INVITATION = 'child_sign_in_invitation';
+
     public function __construct(
         public readonly string $to,
         public readonly string $template,

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Controller\Dashboard;
 
+use App\Entity\User;
+use App\Service\ChildAccountResolver;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -16,13 +18,22 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
  *
  * #[IsGranted] is the enforcement. The absence of a navigation link is not --
  * that is asserted in RoleLandingTest, which checks both together.
+ *
+ * `isChild` is passed so the template can hide the "My family" link for a
+ * child account -- `FamilyVoter::MANAGE_FAMILY` would refuse it anyway, but a
+ * dead link that just 403s is not real navigation.
  */
 final class PlayerDashboardController extends AbstractController
 {
     #[Route('/player', name: 'player_dashboard', methods: ['GET'])]
     #[IsGranted('ROLE_PLAYER')]
-    public function index(): Response
+    public function index(ChildAccountResolver $childAccountResolver): Response
     {
-        return $this->render('dashboard/player.html.twig');
+        /** @var User $player */
+        $player = $this->getUser();
+
+        return $this->render('dashboard/player.html.twig', [
+            'isChild' => $childAccountResolver->isChild($player),
+        ]);
     }
 }

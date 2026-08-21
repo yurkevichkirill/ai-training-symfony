@@ -5,6 +5,12 @@
 {% block h1 %}Your players{% endblock %}
 
 {% block body %}
+    {{ form_start(filterForm) }}
+        {{ form_row(filterForm.dayOfWeek) }}
+        {{ form_row(filterForm.time) }}
+        <button type="submit">Filter</button>
+    {{ form_end(filterForm) }}
+
     {% if roster is empty %}
         <p>No players yet. Share your <a href="{{ path('app_trainer_share_link') }}">invite link</a> to get started.</p>
     {% else %}
@@ -14,6 +20,7 @@
                     <th scope="col">Name</th>
                     <th scope="col">Email</th>
                     <th scope="col">Joined</th>
+                    <th scope="col">Best Times</th>
                 </tr>
             </thead>
             <tbody>
@@ -22,6 +29,7 @@
                         <td>{{ playerProfiles[association.player.id.toRfc4122]?.playerName ?? association.player.displayName }}</td>
                         <td>{{ association.player.email }}</td>
                         <td>{{ association.createdAt|date('Y-m-d') }}</td>
+                        <td>{{ availabilitySummaries[association.player.id.toRfc4122] }}</td>
                     </tr>
                 {% endfor %}
             </tbody>

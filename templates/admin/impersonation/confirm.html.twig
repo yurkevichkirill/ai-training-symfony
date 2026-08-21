@@ -1,0 +1,16 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Impersonate user{% endblock %}
+{% block h1 %}Impersonate user{% endblock %}
+
+{% block body %}
+    <p>View platform as {{ target.displayName }} ({{ target.role.value }})?</p>
+
+    <form method="post" action="{{ path('admin_impersonation_confirm', {id: target.id}) }}">
+        <input type="hidden" name="_switch_user" value="{{ target.email }}">
+        <input type="hidden" name="_token" value="{{ csrf_token('impersonate_' ~ target.email) }}">
+        <button type="submit">View platform as {{ target.displayName }}</button>
+    </form>
+
+    <p><a href="{{ path('admin_users_index') }}">Cancel</a></p>
+{% endblock %}

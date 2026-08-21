@@ -6,6 +6,7 @@ namespace App\Controller\Trainer;
 
 use App\Entity\User;
 use App\Service\PlayerShareLinkService;
+use App\Service\TrainerBrandingResolver;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
@@ -20,13 +21,16 @@ use Symfony\Component\Security\Http\Attribute\IsGranted;
 final class ShareLinkController extends AbstractController
 {
     #[Route('/trainer/share-link', name: 'app_trainer_share_link', methods: ['GET'])]
-    public function show(PlayerShareLinkService $shareLinkService): Response
+    public function show(PlayerShareLinkService $shareLinkService, TrainerBrandingResolver $brandingResolver): Response
     {
         /** @var User $trainer */
         $trainer = $this->getUser();
 
         $link = $shareLinkService->getOrCreateFor($trainer);
 
-        return $this->render('trainer/share_link/show.html.twig', ['link' => $link]);
+        return $this->render('trainer/share_link/show.html.twig', [
+            'link' => $link,
+            'branding' => $brandingResolver->forViewerChrome($trainer),
+        ]);
     }
 }

@@ -12,6 +12,7 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use SymfonyCasts\Bundle\ResetPassword\Exception\ResetPasswordExceptionInterface;
 
 /**
@@ -75,14 +76,16 @@ final class ResetPasswordController extends AbstractController
      * caught here and mapped to a `refused` template state -- neither may
      * escape as an uncaught 500.
      *
-     * On success, `$session->invalidate()` both discards any pre-existing
-     * session for whoever is currently viewing the link and satisfies AC-8's
+     * On success, the current session is discarded -- `$tokenStorage->setToken(null)`
+     * *and* `$session->invalidate()`, see the inline comment for why either
+     * one alone is not enough -- which both ends any pre-existing session
+     * for whoever is currently viewing the link and satisfies AC-8's
      * regeneration-on-password-change requirement, per the architecture's
-     * explicit reasoning -- the reset is always applied to the token's
+     * explicit reasoning. The reset itself is always applied to the token's
      * subject, never to whoever happened to be signed in on this browser.
      */
     #[Route('/reset-password/reset/{token}', name: 'app_reset_password', methods: ['GET', 'POST'])]
-    public function reset(Request $request, string $token, PasswordResetService $passwordResetService): Response
+    public function reset(Request $request, string $token, PasswordResetService $passwordResetService, TokenStorageInterface $tokenStorage): Response
     {
         $form = $this->createForm(ChangePasswordFormType::class);
         $form->handleRequest($request);
@@ -101,6 +104,29 @@ final class ResetPasswordController extends AbstractController
                 ]);
             }
 
+            // Both halves are required, and the order does not matter.
+            //
+            // `invalidate()` destroys the session data and regenerates the
+            // id. On its own that is NOT enough to end the session: if
+            // anything on this request has already caused the firewall to
+            // restore the token into token storage, `ContextListener::onKernelResponse()`
+            // serializes that still-present token straight back into the
+            // freshly regenerated session, and the browser walks away
+            // authenticated with a brand-new cookie. Whether that happens
+            // used to depend on nothing here at all -- `^/reset-password`
+            // is PUBLIC_ACCESS and the firewall is `lazy`, so on this route
+            // the token was historically never restored, and `invalidate()`
+            // alone happened to be sufficient. Any listener or service that
+            // reads the token on an ordinary request (S6's
+            // `ImpersonationExpirySubscriber` does, at `kernel.request`
+            // priority 7) silently removes that accident and re-authenticates
+            // the very session this line is trying to discard.
+            //
+            // Clearing token storage makes AC-8/AC-12 hold on this path by
+            // construction instead of by side effect: with no token to
+            // persist, `ContextListener` removes the session key rather
+            // than rewriting it.
+            $tokenStorage->setToken(null);
             $request->getSession()->invalidate();
 
             return $this->redirectToRoute('app_login');

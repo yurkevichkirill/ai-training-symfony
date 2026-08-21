@@ -1,0 +1,34 @@
+{# `App\MessageHandler\SendEmailMessageHandler` renders this file the same
+   three-block way verify_email.html.twig documents. Sent to the child's own
+   newly-set real address (S2's `email_verified_at` stays null until they act,
+   same as any other new account) once a parent enables sign-in
+   (`ChildAccountService::enableSignIn()`, D1d). Context: `invitationUrl` (an
+   absolute URL to the already-shipped `app_account_invitation` route, built
+   by the handler from the message's raw `token`), `childName`. #}
+{% if false %}
+    {% block subject %}Set up your sign-in for the platform{% endblock %}
+    {% block text %}
+Hello {{ childName }},
+
+A parent has enabled sign-in for your player account on the platform. Set
+your password to activate it by opening the link below:
+
+{{ invitationUrl }}
+
+This link expires in 7 days. If you were not expecting this, you can safely
+ignore this email.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello {{ childName }},</p>
+        <p>A parent has enabled sign-in for your player account on the platform. Set your password to activate it by clicking the link below:</p>
+        <p><a href="{{ invitationUrl }}">Set your password</a></p>
+        <p>This link expires in 7 days. If you were not expecting this, you can safely ignore this email.</p>
+    </body>
+</html>

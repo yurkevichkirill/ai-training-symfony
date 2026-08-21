@@ -36,22 +36,35 @@ final class FileStorage
     }
 
     /**
+     * S7: `$maxBytes`/`$allowedMimeTypes` are optional, defaulted trailing
+     * parameters -- `null` falls back to the class constants exactly as
+     * before this slice, so an existing call such as
+     * `ProfileService::uploadPhoto()`'s `store($file, 'photos')` is
+     * unchanged in text and in behavior (D2b). A caller with a narrower
+     * policy (S7's 2MB logo cap, PNG/JPEG/WebP only) states it at the call
+     * site instead of a second global constant or a parallel class.
+     *
+     * @param array<string, string>|null $allowedMimeTypes real, content-sniffed MIME type -> file extension
+     *
      * @throws FileTooLargeException
      * @throws UnsupportedFileTypeException
      */
-    public function store(UploadedFile $file, string $prefix): string
+    public function store(UploadedFile $file, string $prefix, ?int $maxBytes = null, ?array $allowedMimeTypes = null): string
     {
+        $maxBytes ??= self::MAX_BYTES;
+        $allowedMimeTypes ??= self::ALLOWED_MIME_TYPES;
+
         $size = $file->getSize();
 
-        if (null === $size || $size > self::MAX_BYTES) {
-            throw new FileTooLargeException(self::MAX_BYTES);
+        if (null === $size || $size > $maxBytes) {
+            throw new FileTooLargeException($maxBytes);
         }
 
         // getMimeType() is content-sniffed (finfo-backed), not derived from
         // the client-supplied filename/extension -- what makes the
         // spoofed-extension edge case fail closed.
         $mimeType = $file->getMimeType();
-        $extension = self::ALLOWED_MIME_TYPES[$mimeType] ?? null;
+        $extension = $allowedMimeTypes[$mimeType] ?? null;
 
         if (null === $extension) {
             throw new UnsupportedFileTypeException($mimeType ?? 'unknown');

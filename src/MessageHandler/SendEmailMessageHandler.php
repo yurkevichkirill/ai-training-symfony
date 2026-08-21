@@ -69,6 +69,8 @@ final class SendEmailMessageHandler
         SendEmailMessage::TEMPLATE_COACH_WELCOME => 'emails/coach_welcome.html.twig',
         SendEmailMessage::TEMPLATE_DUPLICATE_REGISTRATION_ATTEMPT => 'emails/duplicate_registration_attempt.html.twig',
         SendEmailMessage::TEMPLATE_PLAYER_TRAINER_CONNECTED => 'emails/player_trainer_connected.html.twig',
+        SendEmailMessage::TEMPLATE_CHILD_SHARE_LINK_REQUEST => 'emails/child_share_link_request.html.twig',
+        SendEmailMessage::TEMPLATE_CHILD_SIGN_IN_INVITATION => 'emails/child_sign_in_invitation.html.twig',
     ];
 
     public function __construct(
@@ -170,6 +172,23 @@ final class SendEmailMessageHandler
             ],
             SendEmailMessage::TEMPLATE_PLAYER_TRAINER_CONNECTED => [
                 'trainerName' => $message->context['trainerName'],
+            ],
+            SendEmailMessage::TEMPLATE_CHILD_SHARE_LINK_REQUEST => [
+                'childName' => $message->context['childName'],
+                'trainerName' => $message->context['trainerName'],
+                'reviewUrl' => $this->urlGenerator->generate(
+                    'app_family_request_review',
+                    ['id' => $message->context['requestId']],
+                    UrlGeneratorInterface::ABSOLUTE_URL,
+                ),
+            ],
+            SendEmailMessage::TEMPLATE_CHILD_SIGN_IN_INVITATION => [
+                'invitationUrl' => $this->urlGenerator->generate(
+                    'app_account_invitation',
+                    ['token' => $message->context['token']],
+                    UrlGeneratorInterface::ABSOLUTE_URL,
+                ),
+                'childName' => $message->context['childName'],
             ],
             default => throw new \InvalidArgumentException(
                 \sprintf('Unknown SendEmailMessage template identifier "%s".', $message->template),

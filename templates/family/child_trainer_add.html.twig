@@ -1,0 +1,16 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Add a trainer{% endblock %}
+{% block h1 %}Add a trainer for {{ childUser.displayName }}{% endblock %}
+
+{% block body %}
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {{ form_row(form.shareLinkCode) }}
+        {{ form_row(form.trainerId) }}
+        <div class="actions">
+            <button type="submit">Connect</button>
+        </div>
+    {{ form_end(form) }}
+{% endblock %}

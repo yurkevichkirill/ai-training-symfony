@@ -1,0 +1,35 @@
+{# `App\MessageHandler\SendEmailMessageHandler` renders this file the same
+   three-block way verify_email.html.twig documents. Sent to the parent
+   (via `NotificationAddressResolver::forPlayer($childUser)`) whenever
+   `ChildTrainerService::recordBlockedClick()` decides to (re-)notify
+   (AC-16, D3b's 24h throttle). Context: `childName`, `trainerName`,
+   `reviewUrl` (the "Review Registration" link, `app_family_request_review`,
+   shipped by `Family\ChildTrainerRequestController::review()`). #}
+{% if false %}
+    {% block subject %}{{ childName }} clicked {{ trainerName }}'s registration link{% endblock %}
+    {% block text %}
+Hello,
+
+{{ childName }} just tried to register with {{ trainerName }} using a
+trainer's invitation link, but child accounts cannot connect themselves to a
+trainer directly.
+
+Review and complete this registration: {{ reviewUrl }}
+
+If you don't recognize this, no connection has been made and none will be
+made until you act.
+    {% endblock %}
+{% endif %}
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>{{ block('subject') }}</title>
+    </head>
+    <body>
+        <p>Hello,</p>
+        <p>{{ childName }} just tried to register with {{ trainerName }} using a trainer's invitation link, but child accounts cannot connect themselves to a trainer directly.</p>
+        <p><a href="{{ reviewUrl }}">Review Registration</a></p>
+        <p>If you don't recognize this, no connection has been made and none will be made until you act.</p>
+    </body>
+</html>

@@ -7,6 +7,17 @@
 {% block body %}
     <p class="meta">Signed in as {{ app.user.email }}.</p>
 
+    <nav aria-label="Dashboard">
+        <ul>
+            <li><a href="{{ path('app_player_trainers') }}">My trainers</a></li>
+            <li><a href="{{ path('app_player_availability') }}">My availability</a></li>
+            <li><a href="{{ path('app_profile_edit') }}">My profile</a></li>
+            {% if not isChild %}
+                <li><a href="{{ path('app_family_index') }}">My family</a></li>
+            {% endif %}
+        </ul>
+    </nav>
+
     <form method="post" action="{{ path('app_logout') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
         <div class="actions">

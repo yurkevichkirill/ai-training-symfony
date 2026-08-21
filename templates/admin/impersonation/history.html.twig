@@ -1,0 +1,68 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Impersonation History{% endblock %}
+{% block h1 %}Impersonation History{% endblock %}
+
+{% block body %}
+    <form method="get" action="{{ path('admin_impersonation_history') }}">
+        <label for="actor_id">Actor id</label>
+        <input type="text" id="actor_id" name="actor_id" value="{{ criteria.actorId }}">
+
+        <label for="subject_id">Subject id</label>
+        <input type="text" id="subject_id" name="subject_id" value="{{ criteria.subjectId }}">
+
+        <label for="started_from">Started from</label>
+        <input type="date" id="started_from" name="started_from" value="{{ criteria.startedFrom ? criteria.startedFrom|date('Y-m-d') : '' }}">
+
+        <label for="started_until">Started until</label>
+        <input type="date" id="started_until" name="started_until" value="{{ criteria.startedUntil ? criteria.startedUntil|date('Y-m-d') : '' }}">
+
+        <button type="submit">Filter</button>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th scope="col">Actor</th>
+                <th scope="col">Subject</th>
+                <th scope="col">Started</th>
+                <th scope="col">Ended</th>
+                <th scope="col">Duration</th>
+                <th scope="col">End reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for session in page.items %}
+                <tr>
+                    <td>{{ session.actorUser.displayName }}</td>
+                    <td>{{ session.subjectUser.displayName }}</td>
+                    <td>{{ session.startedAt|date('Y-m-d H:i:s') }}</td>
+                    {% if session.endedAt %}
+                        <td>{{ session.endedAt|date('Y-m-d H:i:s') }}</td>
+                        <td>{{ session.duration.days }}d {{ session.duration.h }}h {{ session.duration.i }}m {{ session.duration.s }}s</td>
+                        <td>{{ session.endReason.value }}</td>
+                    {% else %}
+                        <td>In progress</td>
+                        <td>In progress</td>
+                        <td>In progress</td>
+                    {% endif %}
+                </tr>
+            {% else %}
+                <tr>
+                    <td colspan="6">No impersonation sessions match these filters.</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if page.hasMore() %}
+        <a href="{{ path('admin_impersonation_history', {
+            actor_id: criteria.actorId,
+            subject_id: criteria.subjectId,
+            started_from: criteria.startedFrom ? criteria.startedFrom|date('Y-m-d') : null,
+            started_until: criteria.startedUntil ? criteria.startedUntil|date('Y-m-d') : null,
+            after_started_at: page.nextAfterStartedAt|date('c'),
+            after_id: page.nextAfterId,
+        }) }}">Next page</a>
+    {% endif %}
+{% endblock %}

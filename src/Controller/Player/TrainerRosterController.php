@@ -7,8 +7,10 @@ namespace App\Controller\Player;
 use App\Entity\User;
 use App\Repository\TrainerPlayerAssociationRepository;
 use App\Repository\UserRepository;
+use App\Security\PlayerActionVoter;
 use App\Service\Exception\NoActiveTrainerAssociationException;
 use App\Service\PlayerShareLinkService;
+use App\Service\TrainerBrandingResolver;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -34,13 +36,22 @@ use Symfony\Component\Uid\Uuid;
 final class TrainerRosterController extends AbstractController
 {
     #[Route('/player/trainers', name: 'app_player_trainers', methods: ['GET'])]
-    public function index(TrainerPlayerAssociationRepository $associationRepository): Response
+    public function index(TrainerPlayerAssociationRepository $associationRepository, TrainerBrandingResolver $brandingResolver): Response
     {
         /** @var User $player */
         $player = $this->getUser();
 
+        $roster = $associationRepository->findActiveForPlayer($player);
+
+        // S7 (Task 23, tier B): one batched call for the whole roster's
+        // trainers, keyed by trainer id -- no N+1, and no `branding` chrome
+        // variable here (D3: a multi-trainer player's own page never gets
+        // one trainer's identity as site chrome).
+        $trainers = array_map(static fn ($association) => $association->getTrainer(), $roster);
+
         return $this->render('player/trainer_roster/index.html.twig', [
-            'roster' => $associationRepository->findActiveForPlayer($player),
+            'roster' => $roster,
+            'brandingByTrainer' => $brandingResolver->forTrainers($trainers),
         ]);
     }
 
@@ -51,6 +62,8 @@ final class TrainerRosterController extends AbstractController
         UserRepository $userRepository,
         PlayerShareLinkService $shareLinkService,
     ): Response {
+        $this->denyAccessUnlessGranted(PlayerActionVoter::MANAGE_OWN_TRAINER_CONNECTIONS);
+
         $trainer = $this->findTrainerOrFail($userRepository, $id);
         $this->assertCsrf($request, 'player_leave_trainer_'.$id);
 

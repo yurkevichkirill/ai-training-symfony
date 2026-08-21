@@ -7,6 +7,13 @@
 {% block body %}
     <p class="meta">Signed in as {{ app.user.email }}.</p>
 
+    <nav aria-label="Dashboard">
+        <ul>
+            <li><a href="{{ path('app_coach_availability') }}">My times</a></li>
+            <li><a href="{{ path('app_profile_edit') }}">My profile</a></li>
+        </ul>
+    </nav>
+
     <form method="post" action="{{ path('app_logout') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
         <div class="actions">

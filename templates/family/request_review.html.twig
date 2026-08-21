@@ -1,0 +1,21 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Review request{% endblock %}
+{% block h1 %}{{ requestEntity.trainer.displayName }} wants to connect with {{ requestEntity.childUser.displayName }}{% endblock %}
+
+{% block body %}
+    <p>
+        {{ requestEntity.childUser.displayName }} tried to follow an invitation from
+        {{ requestEntity.trainer.displayName }}, but a signed-in child cannot connect to a
+        trainer directly. Approve to connect them, or dismiss to take no action.
+    </p>
+
+    <form method="post" action="{{ path('app_family_request_approve', {id: requestEntity.id}) }}" style="display:inline">
+        <input type="hidden" name="_token" value="{{ csrf_token('family_request_approve_' ~ requestEntity.id) }}">
+        <button type="submit">Approve</button>
+    </form>
+    <form method="post" action="{{ path('app_family_request_dismiss', {id: requestEntity.id}) }}" style="display:inline">
+        <input type="hidden" name="_token" value="{{ csrf_token('family_request_dismiss_' ~ requestEntity.id) }}">
+        <button type="submit">Dismiss</button>
+    </form>
+{% endblock %}

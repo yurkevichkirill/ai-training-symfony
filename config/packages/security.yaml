@@ -57,6 +57,22 @@ security:
                 # token id defaults to 'logout', also in stateless_token_ids.
                 enable_csrf: true
 
+            # S6 (Super Admin Impersonation): the whole policy of who may
+            # impersonate whom lives in ImpersonationVoter, on the
+            # `role` attribute below -- SwitchUserListener calls the access
+            # decision manager with the *target user as the subject*
+            # (BR-001, BR-002). `parameter` is stated explicitly, matching
+            # the default, because ImpersonationGuardSubscriber and the
+            # confirmation form both hard-depend on it. `target_route` is
+            # load-bearing, not cosmetic: left unset, the listener redirects
+            # back to the triggering URI (/admin/users/{id}/impersonate),
+            # which the freshly impersonated non-admin user is refused --
+            # the feature's first impersonated page would 403 (D3c).
+            switch_user:
+                parameter: _switch_user
+                role: ROLE_ALLOWED_TO_SWITCH
+                target_route: app_home
+
     # Flat by design. ROLE_SUPER_ADMIN deliberately does NOT inherit
     # ROLE_TRAINER and friends: inheritance would give a Super Admin silent,
     # unaudited reach into a trainer's workspace. That reach is impersonation,

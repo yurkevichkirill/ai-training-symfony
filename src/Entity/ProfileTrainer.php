@@ -31,6 +31,24 @@ class ProfileTrainer extends Profile
     #[ORM\Column(type: 'text', nullable: true)]
     private ?string $description = null;
 
+    /**
+     * S7 (Trainer Portal Branding): the opaque `FileStorage` key
+     * (`branding/<32-hex>.<ext>`) for this trainer's uploaded logo. `NULL`
+     * is the "never uploaded" state -- the platform placeholder renders,
+     * never a broken `<img>`.
+     */
+    #[ORM\Column(name: 'logo_key', type: 'string', length: 255, nullable: true)]
+    private ?string $logoKey = null;
+
+    /**
+     * S7: `#rrggbb`, lowercase. `NULL` is "no override" -- the stylesheet's
+     * `--color-primary` default stands. A database CHECK (this slice's
+     * migration) is the third layer of this invariant, alongside the DTO's
+     * normalisation and the form's `Regex` constraint.
+     */
+    #[ORM\Column(name: 'primary_color_hex', type: 'string', length: 7, nullable: true)]
+    private ?string $primaryColorHex = null;
+
     public function __construct(User $user, string $businessName, ?\DateTimeImmutable $now = null)
     {
         parent::__construct($user, $now);
@@ -75,5 +93,25 @@ class ProfileTrainer extends Profile
     public function setDescription(?string $description): void
     {
         $this->description = $description;
+    }
+
+    public function getLogoKey(): ?string
+    {
+        return $this->logoKey;
+    }
+
+    public function setLogoKey(?string $logoKey): void
+    {
+        $this->logoKey = $logoKey;
+    }
+
+    public function getPrimaryColorHex(): ?string
+    {
+        return $this->primaryColorHex;
+    }
+
+    public function setPrimaryColorHex(?string $primaryColorHex): void
+    {
+        $this->primaryColorHex = $primaryColorHex;
     }
 }

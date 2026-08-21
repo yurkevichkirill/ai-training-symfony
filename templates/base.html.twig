@@ -24,6 +24,18 @@
            without tabbing through any repeated chrome (AC-22). #}
         <a class="skip-link" href="#main-content">Skip to main content</a>
 
+        {# S6 (AC-5): one include makes the impersonation banner appear on
+           every authenticated route, including every route this slice
+           never touches -- the alternative (per-template includes) is a
+           rule someone will forget. #}
+        {{ include('_impersonation_banner.html.twig') }}
+
+        {# S7 (D3c, AC-6, AC-8, AC-11): one more single include, following
+           the same rule as the banner above it -- inert on every page that
+           passes no `branding` variable, and it is the only place a
+           trainer's logo/color override can render as page chrome. #}
+        {{ include('_branding.html.twig') }}
+
         {# Exactly one <h1> per page: every page template sets the `h1` block
            and nothing else renders a top-level heading, so no page can end up
            with zero or with more than one (AC-22). #}

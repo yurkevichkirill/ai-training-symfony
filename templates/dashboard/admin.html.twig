@@ -7,6 +7,14 @@
 {% block body %}
     <p class="meta">Signed in as {{ app.user.email }}.</p>
 
+    <nav aria-label="Dashboard">
+        <ul>
+            <li><a href="{{ path('admin_users_index') }}">Users</a></li>
+            <li><a href="{{ path('admin_users_create') }}">Create user</a></li>
+            <li><a href="{{ path('admin_impersonation_history') }}">Impersonation history</a></li>
+        </ul>
+    </nav>
+
     <form method="post" action="{{ path('app_logout') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token('logout') }}">
         <div class="actions">

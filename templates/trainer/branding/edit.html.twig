@@ -1,0 +1,86 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Branding{% endblock %}
+{% block h1 %}Branding{% endblock %}
+
+{% block body %}
+    {# AC-8: a live preview of the picked color, updated before saving --
+       progressive enhancement only (D3c/D4b's inline-listener approach);
+       the form still works, and still validates server-side, with
+       JavaScript disabled. #}
+    <section id="branding-preview" style="--color-primary: {{ branding.primaryColorHex }}; --color-primary-contrast: {{ branding.contrastColorHex }}; border: 1px solid #ccc; padding: 1rem; margin-bottom: 1.5rem;">
+        <h2>Preview</h2>
+        <p id="branding-preview-logo">
+            {% if branding.hasLogo %}
+                <img src="{{ branding.logoUrl }}" alt="Current logo" style="max-height: 100px; max-width: 100px; width: auto;">
+            {% else %}
+                No logo uploaded yet.
+            {% endif %}
+        </p>
+        <button type="button" style="background-color: var(--color-primary); color: var(--color-primary-contrast); border: none; padding: 0.5rem 1rem;">
+            Sample button
+        </button>
+    </section>
+
+    <h2>Logo</h2>
+    {# AC-3, AC-4, AC-5: a PNG/JPG/WEBP file under 2MB; the accept attribute
+       is a hint only -- `TrainerBrandingService::uploadLogo()` content-sniffs
+       and enforces every real limit server-side. #}
+    <form method="post" action="{{ path('app_trainer_branding_logo') }}" enctype="multipart/form-data">
+        <input type="hidden" name="_token" value="{{ csrf_token('submit') }}">
+        <label for="branding-logo-input">Upload a new logo (PNG, JPG, or WEBP, up to 2MB)</label>
+        <input type="file" id="branding-logo-input" name="logo" accept="image/png,image/jpeg,image/webp" required>
+        <button type="submit">Upload logo</button>
+    </form>
+
+    <h2>Primary color</h2>
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {{ form_row(form.primaryColorHex, {attr: {id: 'branding-color-input'}}) }}
+        <div class="actions">
+            <button type="submit">Save color</button>
+        </div>
+    {{ form_end(form) }}
+
+    <h2>Reset</h2>
+    <form method="post" action="{{ path('app_trainer_branding_reset') }}">
+        <input type="hidden" name="_token" value="{{ csrf_token('submit') }}">
+        <button type="submit">Reset to default</button>
+    </form>
+
+    {# Progressive enhancement, AC-3/AC-8: neither listener writes anything
+       back to the server -- they only update the preview section above
+       before the trainer decides to save. #}
+    <script>
+        (function () {
+            var colorInput = document.getElementById('branding-color-input');
+            var preview = document.getElementById('branding-preview');
+
+            if (colorInput && preview) {
+                colorInput.addEventListener('input', function () {
+                    preview.style.setProperty('--color-primary', colorInput.value);
+                });
+            }
+
+            var logoInput = document.getElementById('branding-logo-input');
+            var logoPreview = document.getElementById('branding-preview-logo');
+
+            if (logoInput && logoPreview) {
+                logoInput.addEventListener('change', function () {
+                    var file = logoInput.files && logoInput.files[0];
+
+                    if (!file) {
+                        return;
+                    }
+
+                    var reader = new FileReader();
+                    reader.onload = function (event) {
+                        logoPreview.innerHTML = '<img src="' + event.target.result + '" alt="Selected logo preview" style="max-height: 100px; max-width: 100px; width: auto;">';
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+        })();
+    </script>
+{% endblock %}

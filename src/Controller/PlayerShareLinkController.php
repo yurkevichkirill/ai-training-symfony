@@ -11,6 +11,8 @@ use App\Message\SendEmailMessage;
 use App\Repository\UserRepository;
 use App\Security\IpTruncator;
 use App\Security\ShareLinkVoter;
+use App\Service\ChildAccountResolver;
+use App\Service\ChildTrainerService;
 use App\Service\Exception\AccountNotEligibleException;
 use App\Service\Exception\EmailAlreadyInUseException;
 use App\Service\Exception\RoleNotEligibleForShareLinkException;
@@ -19,6 +21,7 @@ use App\Service\PlayerRegistrationRequest;
 use App\Service\PlayerRegistrationService;
 use App\Service\PlayerShareLinkResolver;
 use App\Service\PlayerShareLinkService;
+use App\Service\TrainerBrandingResolver;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -55,6 +58,9 @@ final class PlayerShareLinkController extends AbstractController
         string $code,
         PlayerShareLinkResolver $resolver,
         PlayerShareLinkService $shareLinkService,
+        ChildAccountResolver $childAccountResolver,
+        ChildTrainerService $childTrainerService,
+        TrainerBrandingResolver $brandingResolver,
     ): Response {
         try {
             $link = $resolver->resolve($code);
@@ -68,12 +74,34 @@ final class PlayerShareLinkController extends AbstractController
             return $this->redirectToRoute('app_share_link_register', ['code' => $code]);
         }
 
+        // Task 34, D3: a signed-in child following ANY trainer's ShareLink
+        // is unconditionally blocked -- before the voter, before any
+        // association check, and regardless of whether an active
+        // association with this exact trainer already exists (the
+        // repeat-click edge case gets the identical block+notify, never a
+        // carve-out). recordBlockedClick() is the only call this branch
+        // ever reaches; PlayerShareLinkService::associate() is never
+        // invoked here.
+        $childAccount = $childAccountResolver->childAccountOf($user);
+
+        if (null !== $childAccount) {
+            $childTrainerService->recordBlockedClick($childAccount, $link);
+
+            return $this->render('share_link/child_blocked.html.twig', [
+                'trainerName' => $link->getTrainer()->getDisplayName(),
+                'branding' => $brandingResolver->forTrainer($link->getTrainer()),
+            ]);
+        }
+
         $this->denyAccessUnlessGranted(ShareLinkVoter::FOLLOW_PLAYER_SHARE_LINK, $link);
 
         try {
             $shareLinkService->associate($user, $link);
         } catch (RoleNotEligibleForShareLinkException|AccountNotEligibleException|ShareLinkUnavailableException $exception) {
-            return $this->render('share_link/refused.html.twig', ['reason' => $exception->getMessage()], new Response(null, Response::HTTP_FORBIDDEN));
+            return $this->render('share_link/refused.html.twig', [
+                'reason' => $exception->getMessage(),
+                'branding' => $brandingResolver->forTrainer($link->getTrainer()),
+            ], new Response(null, Response::HTTP_FORBIDDEN));
         }
 
         $this->addFlash('success', "You're now connected with this trainer.");
@@ -116,6 +144,7 @@ final class PlayerShareLinkController extends AbstractController
         RateLimiterFactory $shareLinkRegistrationSourceLimiter,
         UserRepository $userRepository,
         MessageBusInterface $messageBus,
+        TrainerBrandingResolver $brandingResolver,
     ): Response {
         try {
             $link = $resolver->resolve($code);
@@ -192,10 +221,15 @@ final class PlayerShareLinkController extends AbstractController
                     }
                 }
 
-                return $this->render('share_link/register_check_email.html.twig');
+                return $this->render('share_link/register_check_email.html.twig', [
+                    'branding' => $brandingResolver->forTrainer($link->getTrainer()),
+                ]);
             }
         }
 
-        return $this->render('share_link/register.html.twig', ['form' => $form]);
+        return $this->render('share_link/register.html.twig', [
+            'form' => $form,
+            'branding' => $brandingResolver->forTrainer($link->getTrainer()),
+        ]);
     }
 }

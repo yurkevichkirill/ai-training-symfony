@@ -13,6 +13,7 @@ use App\Message\SendEmailMessage;
 use App\Repository\PlayerShareLinkRepository;
 use App\Repository\TrainerPlayerAssociationRepository;
 use App\Service\Exception\AccountNotEligibleException;
+use App\Service\Exception\ChildActionNotPermittedException;
 use App\Service\Exception\NoActiveTrainerAssociationException;
 use App\Service\Exception\RoleNotEligibleForShareLinkException;
 use App\Service\Exception\ShareLinkUnavailableException;
@@ -26,6 +27,12 @@ use Symfony\Component\Messenger\MessageBusInterface;
  * what following it does to the player's roster membership (AC-6, AC-11,
  * AC-12, AC-13, AC-20) -- plus, since Task 36 (AC-11 amendment), the
  * player's own way to end that membership again ({@see self::leave()}).
+ * Task 10 widens the association writer into
+ * {@see self::associateWithTrainer()} (an optional link, an explicit
+ * trainer, and an actor distinct from the player) and the ender into
+ * {@see self::endAssociation()}, so this remains the one writer of a
+ * `TrainerPlayerAssociation` for both the original player-self-serve flows
+ * and the parent-acting-for-a-child flows alike (D2b).
  *
  * **The closed-EntityManager pitfall** this class follows is the same one
  * `UserAccountService`/`AccountLifecycleService` document at length: a
@@ -46,6 +53,8 @@ final class PlayerShareLinkService
         private readonly ShareLinkCodeGenerator $codeGenerator,
         private readonly AccountEventRecorder $accountEventRecorder,
         private readonly MessageBusInterface $messageBus,
+        private readonly ChildAccountResolver $childAccountResolver,
+        private readonly NotificationAddressResolver $notificationAddressResolver,
     ) {
     }
 
@@ -147,9 +156,38 @@ final class PlayerShareLinkService
      * to the player, post-commit, alongside the `AccountEvent` -- on every
      * genuinely new association, including the "existing account follows a
      * second trainer" path (AC-12), never on the idempotent branch above.
+     *
+     * **Task 10 (D2b): widened for the family flows.** `$trainer` now comes
+     * in directly rather than only via `$link->getTrainer()`, `$link` itself
+     * is optional (`ChildTrainerService::approveRequest()`/the parent's
+     * "connect to an additional trainer" path have no ShareLink to hand
+     * back -- the atomic `usage_count` increment below only runs when one
+     * was actually used), and `$actor` names who is performing the action,
+     * defaulting to `$player` for every existing S3 call site. `associate()`
+     * below is the original two-argument entry point, now a one-line
+     * wrapper, so every S3 call site and every S3 test is untouched.
+     *
+     * **New guard (AC-14):** if the acting user *is* the player and
+     * {@see ChildAccountResolver::isChild()} says that player is a child,
+     * this refuses with {@see ChildActionNotPermittedException} -- a child
+     * cannot connect itself to a trainer through any route, forged or
+     * otherwise. An adult acting on a child's behalf (a parent, `$actor !==
+     * $player`) is exactly what the family flows need this guard to allow.
+     *
+     * **Task 10 (D3c):** the `TEMPLATE_PLAYER_TRAINER_CONNECTED` dispatch
+     * now routes through {@see NotificationAddressResolver::forPlayer()}
+     * instead of `$player->getEmail()` directly -- for a child player this
+     * is the parent's address, not the child's undeliverable `.invalid`
+     * placeholder; for every other player it is unchanged.
      */
-    public function associate(User $player, PlayerShareLink $link): TrainerPlayerAssociation
+    public function associateWithTrainer(User $player, User $trainer, ?PlayerShareLink $link, ?User $actor = null): TrainerPlayerAssociation
     {
+        $actor ??= $player;
+
+        if ($actor === $player && $this->childAccountResolver->isChild($player)) {
+            throw new ChildActionNotPermittedException();
+        }
+
         if (UserRole::PLAYER !== $player->getRole()) {
             throw new RoleNotEligibleForShareLinkException();
         }
@@ -157,8 +195,6 @@ final class PlayerShareLinkService
         if (!$player->isActive()) {
             throw new AccountNotEligibleException();
         }
-
-        $trainer = $link->getTrainer();
 
         if (!$trainer->isActive()) {
             throw new ShareLinkUnavailableException();
@@ -176,6 +212,10 @@ final class PlayerShareLinkService
         try {
             $entityManager->wrapInTransaction(static function () use ($entityManager, $association, $link): void {
                 $entityManager->persist($association);
+
+                if (null === $link) {
+                    return;
+                }
 
                 // Atomic, database-computed increment -- see this method's
                 // docblock for why this is not `$link->incrementUsage()` +
@@ -222,7 +262,7 @@ final class PlayerShareLinkService
         ));
 
         $this->messageBus->dispatch(new SendEmailMessage(
-            to: $player->getEmail(),
+            to: $this->notificationAddressResolver->forPlayer($player),
             template: SendEmailMessage::TEMPLATE_PLAYER_TRAINER_CONNECTED,
             context: [
                 'trainerName' => $trainer->getDisplayName(),
@@ -233,44 +273,96 @@ final class PlayerShareLinkService
     }
 
     /**
+     * S3's original two-argument entry point, unchanged for every existing
+     * call site and test: the trainer is always the link's own trainer, and
+     * the acting user is always the player themselves.
+     */
+    public function associate(User $player, PlayerShareLink $link): TrainerPlayerAssociation
+    {
+        return $this->associateWithTrainer($player, $link->getTrainer(), $link);
+    }
+
+    /**
      * Task 36 (AC-11 amendment): the player's "leave this trainer" action.
      * Only ever operates on the `$player`/`$trainer` pair the caller
      * supplies -- `Player\TrainerRosterController::leave()` always passes
      * `$this->getUser()` as `$player`, never a player id taken from the
      * request, the same rule `ProfileController` established for
-     * self-service actions.
+     * self-service actions. Because of that, this method's caller is always
+     * the player themselves -- unlike {@see self::associateWithTrainer()}
+     * there is no separate `$actor` to name.
      *
-     * Finds the player's currently-active association with this trainer via
-     * {@see TrainerPlayerAssociationRepository::findOneFor()} (Task 36:
-     * active-only) and sets `endedAt = now`. A player with no active
-     * association with this trainer -- never connected, or already left --
-     * is refused with a typed exception rather than a silent no-op: this
-     * project's established convention for an invalid state transition
-     * (`AccountLifecycleService::deactivate()`/`reactivate()`), and it lets
-     * the controller tell a genuine double-submit apart from a bug.
+     * **Task 10 (AC-14): same child-actor guard as
+     * `associateWithTrainer()`** -- a child cannot end its own trainer
+     * connection through any route, forged or otherwise, so this refuses
+     * with {@see ChildActionNotPermittedException} before even looking up
+     * an association.
      *
-     * No unique-constraint race is possible here (this only ever updates an
-     * existing row's `endedAt`, never inserts), so this does not need
-     * `associate()`'s closed-EntityManager recovery dance -- a plain flush
-     * against the manager registered for this entity class is sufficient,
-     * the same shape `AccountLifecycleService::flush()` uses for its own
-     * single-entity mutations.
+     * **Task 10 (D2c): now a thin wrapper over {@see self::endAssociation()}**
+     * -- refuses with {@see NoActiveTrainerAssociationException} when that
+     * conditional `UPDATE` affects no row (never connected, or already
+     * left), the same "invalid state transition is a typed exception, not a
+     * quiet success" convention this project follows throughout, and it
+     * lets the controller tell a genuine double-submit apart from a bug.
      *
      * @throws NoActiveTrainerAssociationException
      */
     public function leave(User $player, User $trainer): void
     {
-        $association = $this->associationRepository->findOneFor($trainer, $player);
-
-        if (null === $association) {
-            throw new NoActiveTrainerAssociationException();
+        if ($this->childAccountResolver->isChild($player)) {
+            throw new ChildActionNotPermittedException();
         }
 
-        $association->end(new \DateTimeImmutable());
+        if (!$this->endAssociation($trainer, $player)) {
+            throw new NoActiveTrainerAssociationException();
+        }
+    }
 
+    /**
+     * D2c: ends the currently-active association between this trainer and
+     * player, if one exists -- a single conditional `UPDATE
+     * trainer_player_association SET ended_at = :now WHERE trainer_id = :t
+     * AND player_id = :p AND ended_at IS NULL`, with the affected-row count
+     * as the answer. Returns `true` when a row was ended, `false` when there
+     * was no currently-active row to end.
+     *
+     * Deliberately **not** `leave()`'s old read-then-`end()`-then-flush
+     * shape: that lets two concurrent callers for the same pairing both read
+     * the row as active, both call `end()`, and both flush -- one success
+     * silently overwriting the other's recorded `endedAt` moment, with
+     * nothing to tell the two racers apart. This single statement's row
+     * count *is* the distinction: exactly one caller's execution affects the
+     * row (`true`), and the other's affects none (`false`), with the
+     * database serializing the two writes at the row level rather than PHP
+     * arbitrating them.
+     *
+     * Used by both `leave()` above and, in a later batch,
+     * `ChildTrainerService::disconnect()` -- the one place this project ends
+     * a `TrainerPlayerAssociation`. Because the statement names one
+     * `(trainer, player)` pair, it can never affect any other trainer's
+     * connection to this player, nor any other player's connection to this
+     * trainer (AC-10), and it never touches `player_availability_slot` --
+     * ending a connection preserves that history exactly as the entity's
+     * "audit trail over hard delete" convention already requires.
+     */
+    public function endAssociation(User $trainer, User $player): bool
+    {
         $manager = $this->managerRegistry->getManagerForClass(TrainerPlayerAssociation::class);
         \assert($manager instanceof EntityManagerInterface);
-        $manager->flush();
+
+        $affectedRows = $manager->createQueryBuilder()
+            ->update(TrainerPlayerAssociation::class, 'association')
+            ->set('association.endedAt', ':now')
+            ->where('association.trainer = :trainer')
+            ->andWhere('association.player = :player')
+            ->andWhere('association.endedAt IS NULL')
+            ->setParameter('now', new \DateTimeImmutable())
+            ->setParameter('trainer', $trainer)
+            ->setParameter('player', $player)
+            ->getQuery()
+            ->execute();
+
+        return $affectedRows > 0;
     }
 
     /**

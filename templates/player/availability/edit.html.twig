@@ -1,0 +1,38 @@
+{% extends 'base.html.twig' %}
+{% import 'form/_error_summary.html.twig' as error_summary %}
+
+{% block title %}Availability{% endblock %}
+{% block h1 %}Availability{% endblock %}
+
+{% block body %}
+    {% if showSwitcher %}
+        <nav aria-label="Switch player">
+            <ul>
+                {% for context in contexts %}
+                    <li>
+                        {% if context.player == subjectUser %}
+                            <strong>{{ context.label }}</strong>
+                        {% else %}
+                            <a href="{{ path('app_player_availability', {player: context.player.id}) }}">{{ context.label }}</a>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+        </nav>
+    {% endif %}
+
+    {% set dayNames = {1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday', 7: 'Sunday'} %}
+    {{ form_start(form) }}
+        {{ error_summary.summary(form) }}
+        {% for day in 1..7 %}
+            <fieldset>
+                <legend>{{ dayNames[day] }}</legend>
+                {{ form_row(form[day].ranges) }}
+                {{ form_row(form[day].notAvailable) }}
+            </fieldset>
+        {% endfor %}
+        <div class="actions">
+            <button type="submit">Save availability</button>
+        </div>
+    {{ form_end(form) }}
+{% endblock %}

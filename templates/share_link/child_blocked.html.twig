@@ -1,0 +1,12 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Ask your parent{% endblock %}
+
+{% block h1 %}Ask your parent{% endblock %}
+
+{% block body %}
+    <p role="alert" class="alert-message">Ask your parent to register you with {{ trainerName }}.</p>
+    <ul class="link-list">
+        <li><a href="{{ path('app_home') }}">Go to your account</a></li>
+    </ul>
+{% endblock %}

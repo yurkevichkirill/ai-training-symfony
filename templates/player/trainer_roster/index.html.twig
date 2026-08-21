@@ -18,8 +18,14 @@
             </thead>
             <tbody>
                 {% for association in roster %}
+                    {% set trainerBranding = brandingByTrainer[association.trainer.id.toRfc4122] %}
                     <tr>
-                        <td>{{ association.trainer.displayName }}</td>
+                        <td>
+                            {% if trainerBranding.hasLogo %}
+                                <img src="{{ trainerBranding.logoUrl }}" alt="{{ association.trainer.displayName }} logo" style="max-height: 40px; max-width: 40px; width: auto; vertical-align: middle;">
+                            {% endif %}
+                            <span style="color: {{ trainerBranding.primaryColorHex }};">{{ association.trainer.displayName }}</span>
+                        </td>
                         <td>{{ association.createdAt|date('Y-m-d') }}</td>
                         <td>
                             <form method="post" action="{{ path('app_player_trainers_leave', {id: association.trainer.id}) }}" style="display:inline">

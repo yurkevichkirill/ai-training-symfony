@@ -37,6 +37,13 @@ class ProfilePlayer extends Profile
     #[ORM\Column(type: 'string', length: 32, enumType: PlayerGender::class)]
     private PlayerGender $gender;
 
+    /**
+     * FR-024's optional school (AC-1). Additive, nullable, no default, no
+     * backfill -- nothing already shipped changes meaning.
+     */
+    #[ORM\Column(type: 'string', length: 160, nullable: true)]
+    private ?string $school = null;
+
     public function __construct(
         User $user,
         string $playerName,
@@ -78,5 +85,15 @@ class ProfilePlayer extends Profile
     public function setGender(PlayerGender $gender): void
     {
         $this->gender = $gender;
+    }
+
+    public function getSchool(): ?string
+    {
+        return $this->school;
+    }
+
+    public function setSchool(?string $school): void
+    {
+        $this->school = $school;
     }
 }
